@@ -11,7 +11,7 @@ use libc::{
     UTUN_OPT_IFNAME,
 };
 
-mod tcp;
+pub mod network;
 pub mod utils;
 
 pub const MTU_SIZE: usize = 1504;

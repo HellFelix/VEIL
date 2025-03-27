@@ -6,7 +6,7 @@ use log::*;
 pub fn init_logger(origin: &str, depth: &str, save_log: bool) {
     let mut logger = Logger::try_with_str(depth)
         .unwrap()
-        .format_for_stdout(colored_detailed_format);
+        .format_for_stdout(colored_default_format);
     if save_log {
         logger = logger
             .log_to_file(

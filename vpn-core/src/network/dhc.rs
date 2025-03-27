@@ -45,18 +45,11 @@ impl Stage {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
     stage: Stage,
-    source: SocketAddrV4,
-    destination: SocketAddrV4,
     checksum: u32,
 }
 impl Message {
-    pub fn new(stage: Stage, source: SocketAddrV4, destination: SocketAddrV4) -> Self {
-        let mut res = Self {
-            stage,
-            source,
-            destination,
-            checksum: 0,
-        };
+    pub fn new(stage: Stage) -> Self {
+        let mut res = Self { stage, checksum: 0 };
 
         let checksum = res.calculate_checksum();
         res.checksum = checksum;
@@ -72,22 +65,10 @@ impl Message {
         bincode::serialize(&self).unwrap()
     }
 
-    pub fn validate(
-        &self,
-        source: SocketAddrV4,
-        destination: SocketAddrV4,
-        expected_stage: Stage,
-    ) -> io::Result<()> {
+    pub fn validate(&self, expected_stage: Stage) -> io::Result<()> {
         if self.checksum == self.calculate_checksum() {
-            if source == self.source && destination == self.destination {
-                self.stage.validate(expected_stage)?;
-                Ok(())
-            } else {
-                Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Incorrect source or destination IP"),
-                ))
-            }
+            self.stage.validate(expected_stage)?;
+            Ok(())
         } else {
             Err(Error::new(
                 ErrorKind::InvalidData,
@@ -111,10 +92,6 @@ impl Message {
         let mut hasher = crc32fast::Hasher::new();
 
         hasher.update(&bincode::serialize(&self.stage).unwrap());
-        hasher.update(&bincode::serialize(&self.source.ip()).unwrap());
-        hasher.update(&bincode::serialize(&self.source.port().to_be_bytes()).unwrap());
-        hasher.update(&bincode::serialize(&self.destination.ip()).unwrap());
-        hasher.update(&bincode::serialize(&self.destination.port().to_be_bytes()).unwrap());
 
         hasher.finalize()
     }

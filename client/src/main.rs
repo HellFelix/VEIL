@@ -6,12 +6,8 @@ use std::{
 };
 
 use vpn_core::{
-    utils::{
-        dhc::{self, Message, Stage},
-        logs::init_logger,
-        shared::SERVER_ADDR,
-        utun,
-    },
+    network::dhc::{self, Message, Stage},
+    utils::{logs::init_logger, shared::SERVER_ADDR, utun},
     TunInterface, MTU_SIZE,
 };
 
@@ -29,21 +25,23 @@ fn init() -> io::Result<()> {
     Ok(())
 }
 
-fn connect_to_server() -> io::Result<(TcpStream, TunInterface)> {
-    let server_socket = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8345);
-    let mut stream = TcpStream::connect(server_socket)?;
-    let client_socket = if let SocketAddr::V4(sock_addr) = stream.local_addr()? {
-        sock_addr
-    } else {
-        return Err(Error::new(
-            ErrorKind::Unsupported,
-            format!("Server only supports Ipv4"),
-        ));
-    };
+#[derive(Debug)]
+#[toml_cfg::toml_config()]
+pub struct ServerConfig {
+    #[default(0)]
+    pub address: u32,
+    #[default(0)]
+    pub port: u16,
+}
 
-    stream.write_all(
-        &mut dhc::Message::new(dhc::Stage::Discover, client_socket, server_socket).to_bytes(),
-    )?;
+fn connect_to_server() -> io::Result<(TcpStream, TunInterface)> {
+    let server_socket = SocketAddrV4::new(
+        Ipv4Addr::from_bits(SERVER_CONFIG.address),
+        SERVER_CONFIG.port,
+    );
+    let mut stream = TcpStream::connect(server_socket)?;
+
+    stream.write_all(&mut dhc::Message::new(dhc::Stage::Discover).to_bytes())?;
     info!("Sent discovery to server");
 
     let mut read_buf = [0; 100];
@@ -51,28 +49,17 @@ fn connect_to_server() -> io::Result<(TcpStream, TunInterface)> {
     // Search for Offer
     let offer_size = stream.read(&mut read_buf)?;
     let offer = Message::from_bytes(&read_buf[..offer_size]);
-    offer.validate(server_socket, client_socket, Stage::Offer(None))?;
+    offer.validate(Stage::Offer(None))?;
     let offered_address = offer.get_addr()?;
     info!("Received offer {offered_address}. Sending request");
 
     // Send request
-    stream.write_all(
-        &mut dhc::Message::new(
-            Stage::Request(offered_address),
-            client_socket,
-            server_socket,
-        )
-        .to_bytes(),
-    )?;
+    stream.write_all(&mut dhc::Message::new(Stage::Request(offered_address)).to_bytes())?;
 
     // Search for Acknowledgement
     let ack_size = stream.read(&mut read_buf)?;
     let acknowledgement = Message::from_bytes(&read_buf[..ack_size]);
-    acknowledgement.validate(
-        server_socket,
-        client_socket,
-        Stage::Acknowledge(offered_address),
-    )?;
+    acknowledgement.validate(Stage::Acknowledge(offered_address))?;
     info!("Received acknowledgement. Initializing interface");
 
     // Initialize TUN interface

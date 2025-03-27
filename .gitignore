@@ -2,3 +2,4 @@
 utun-test/
 logs/
 */Cargo.lock
+*/certs/*

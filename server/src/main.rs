@@ -4,13 +4,9 @@ use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream},
 };
 use vpn_core::{
-    utils::{
-        dhc::{self, Message, Stage},
-        logs::init_logger,
-        shared::SERVER_ADDR,
-        utun,
-    },
-    TunInterface, MTU_SIZE,
+    network::dhc::{self, Message, Stage},
+    utils::{logs::init_logger, shared::SERVER_ADDR, utun},
+    MTU_SIZE,
 };
 
 mod icmp;
@@ -30,7 +26,7 @@ fn init() -> io::Result<()> {
 }
 
 fn run_server() -> io::Result<()> {
-    let server_socket = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8345);
+    let server_socket = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8345);
     let listener = TcpListener::bind(SocketAddr::V4(server_socket))?;
     let mut addr_pool = dhc::AddrPool::create();
 
@@ -53,36 +49,22 @@ fn run_server() -> io::Result<()> {
         // Check for discovery
         let disc_size = s.read(&mut read_buf)?;
         let discovery = Message::from_bytes(&read_buf[..disc_size]);
-        discovery.validate(client_socket, server_socket, Stage::Discover)?;
+        discovery.validate(Stage::Discover)?;
         info!("Received discovery from client {client_socket}");
 
         // Offer IP
         let offered_addr = addr_pool.find_unclaimed()?;
         info!("Offering address {offered_addr} to {client_socket}");
-        s.write_all(
-            &mut dhc::Message::new(
-                Stage::Offer(Some(offered_addr)),
-                server_socket,
-                client_socket,
-            )
-            .to_bytes(),
-        )?;
+        s.write_all(&mut dhc::Message::new(Stage::Offer(Some(offered_addr))).to_bytes())?;
 
         // Check for request
         let req_size = s.read(&mut read_buf)?;
         let request = dhc::Message::from_bytes(&read_buf[..req_size]);
-        request.validate(client_socket, server_socket, Stage::Request(offered_addr))?;
+        request.validate(Stage::Request(offered_addr))?;
         info!("Client {client_socket} has requested address {offered_addr}. Sending Acknowledgement...");
 
         // Send Acknowledgement
-        s.write_all(
-            &mut dhc::Message::new(
-                Stage::Acknowledge(offered_addr),
-                server_socket,
-                client_socket,
-            )
-            .to_bytes(),
-        )?;
+        s.write_all(&mut dhc::Message::new(Stage::Acknowledge(offered_addr)).to_bytes())?;
 
         addr_pool.claim(offered_addr)?;
 
