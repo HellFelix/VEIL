@@ -2,40 +2,35 @@ use std::{
     ffi::{CStr, CString},
     io,
     mem::{self, zeroed},
-    os::fd::{OwnedFd, RawFd},
-    thread::sleep,
-    time::Duration,
+    os::fd::RawFd,
 };
 
 use libc::{
-    c_char, c_int, c_void, connect, ctl_info, getsockopt, ioctl, read, sockaddr, sockaddr_ctl,
-    socket, socklen_t, strncpy, write, AF_SYSTEM, AF_SYS_CONTROL, CTLIOCGINFO, IFNAMSIZ,
-    IF_NAMESIZE, MAX_KCTL_NAME, PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL, UTUN_OPT_IFNAME,
+    c_char, c_void, connect, ctl_info, getsockopt, ioctl, read, sockaddr, sockaddr_ctl, socklen_t,
+    ssize_t, write, AF_SYSTEM, CTLIOCGINFO, IFNAMSIZ, PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL,
+    UTUN_OPT_IFNAME,
 };
 
 mod tcp;
 pub mod utils;
 
-const MTU_SIZE: usize = 1504;
+pub const MTU_SIZE: usize = 1504;
 /// Represents a successfully opened TUN interface.
 pub struct TunInterface {
-    fd: RawFd,
+    pub fd: RawFd,
     pub name: String,
 }
 impl TunInterface {
-    pub fn read(&self, buf: &mut [u8; MTU_SIZE]) -> io::Result<()> {
+    pub fn read(&self, buf: &mut [u8; MTU_SIZE]) -> Option<ssize_t> {
         unsafe {
-            if read(self.fd, buf.as_mut_ptr() as *mut c_void, MTU_SIZE) < 0 {
-                return Err(io::Error::last_os_error());
-            } else {
-                Ok(())
-            }
+            let res = read(self.fd, buf.as_mut_ptr() as *mut c_void, MTU_SIZE);
+            return if res > 0 { Some(res) } else { None };
         }
     }
 
-    pub fn write(&self, buf: &mut [u8; MTU_SIZE]) -> io::Result<()> {
+    pub fn write(&self, buf: &mut [u8]) -> io::Result<()> {
         unsafe {
-            if write(self.fd, buf.as_mut_ptr() as *mut c_void, MTU_SIZE) < 0 {
+            if write(self.fd, buf.as_mut_ptr() as *mut c_void, buf.len()) < 0 {
                 return Err(io::Error::last_os_error());
             } else {
                 Ok(())
@@ -76,7 +71,7 @@ pub unsafe fn open_utun() -> io::Result<TunInterface> {
     addr.sc_unit = 0; // Let the system pick the next available utun
 
     let connect_result = unsafe {
-        libc::connect(
+        connect(
             fd,
             &addr as *const _ as *const sockaddr,
             mem::size_of::<sockaddr_ctl>() as u32,

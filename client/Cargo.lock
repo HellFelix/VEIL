@@ -81,7 +81,6 @@ dependencies = [
 name = "client"
 version = "0.1.0"
 dependencies = [
- "flexi_logger",
  "log",
  "vpn-core",
 ]
