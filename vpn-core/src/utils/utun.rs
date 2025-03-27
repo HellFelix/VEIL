@@ -1,17 +1,17 @@
 use log::*;
-use std::{io, process};
+use std::{io, net::Ipv4Addr, process};
 
 use crate::{open_utun, TunInterface};
 
-pub fn setup(interface_ip: &str, peer_ip: &str) -> io::Result<TunInterface> {
+pub fn setup(interface_ip: Ipv4Addr, peer_ip: Ipv4Addr) -> io::Result<TunInterface> {
     let interface = unsafe { open_utun()? };
     info!("Successfully initialized {} interface", interface.name);
 
     process::Command::new("ifconfig")
         .args([
             interface.name.clone(),
-            String::from(interface_ip),
-            String::from(peer_ip),
+            format!("{interface_ip}"),
+            format!("{peer_ip}"),
             String::from("up"),
         ])
         .status()
