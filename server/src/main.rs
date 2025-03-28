@@ -4,7 +4,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream},
 };
 use vpn_core::{
-    network::dhc::{self, Message, Stage},
+    network::dhc::{self, Handshake, Stage},
     utils::{logs::init_logger, shared::SERVER_ADDR, utun},
     MTU_SIZE,
 };
@@ -48,23 +48,27 @@ fn run_server() -> io::Result<()> {
 
         // Check for discovery
         let disc_size = s.read(&mut read_buf)?;
-        let discovery = Message::from_bytes(&read_buf[..disc_size]);
-        discovery.validate(Stage::Discover)?;
-        info!("Received discovery from client {client_socket}");
+        let discovery = Handshake::from_bytes(&read_buf[..disc_size]);
+        discovery.validate(None)?;
+        let session_id = discovery.get_session_id();
+        info!("Received discovery from client {client_socket}. Session ID is {session_id:#10x}");
 
         // Offer IP
         let offered_addr = addr_pool.find_unclaimed()?;
-        info!("Offering address {offered_addr} to {client_socket}");
-        s.write_all(&mut dhc::Message::new(Stage::Offer(Some(offered_addr))).to_bytes())?;
+        let mut offer = discovery.advance()?;
+        offer.set_offer(offered_addr);
+        info!("Offering address {offered_addr} to client on {session_id:#10x}");
+        s.write_all(&mut offer.to_bytes())?;
 
         // Check for request
+        let expected_request = offer.advance()?;
         let req_size = s.read(&mut read_buf)?;
-        let request = dhc::Message::from_bytes(&read_buf[..req_size]);
-        request.validate(Stage::Request(offered_addr))?;
-        info!("Client {client_socket} has requested address {offered_addr}. Sending Acknowledgement...");
+        let request = Handshake::from_bytes(&read_buf[..req_size]);
+        request.validate(Some(expected_request))?;
+        info!("Client on session {session_id:#10x} has sent approved request for address {offered_addr}. Sending Acknowledgement...");
 
         // Send Acknowledgement
-        s.write_all(&mut dhc::Message::new(Stage::Acknowledge(offered_addr)).to_bytes())?;
+        s.write_all(&request.advance()?.to_bytes())?;
 
         addr_pool.claim(offered_addr)?;
 

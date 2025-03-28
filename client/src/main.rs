@@ -6,7 +6,7 @@ use std::{
 };
 
 use vpn_core::{
-    network::dhc::{self, Message, Stage},
+    network::dhc::{self, Handshake, Stage},
     utils::{logs::init_logger, shared::SERVER_ADDR, utun},
     TunInterface, MTU_SIZE,
 };
@@ -39,27 +39,32 @@ fn connect_to_server() -> io::Result<(TcpStream, TunInterface)> {
         Ipv4Addr::from_bits(SERVER_CONFIG.address),
         SERVER_CONFIG.port,
     );
+    info!("connecting to {server_socket}");
     let mut stream = TcpStream::connect(server_socket)?;
 
-    stream.write_all(&mut dhc::Message::new(dhc::Stage::Discover).to_bytes())?;
+    let discovery = Handshake::initial_handshake();
+    stream.write_all(&mut discovery.to_bytes())?;
     info!("Sent discovery to server");
+    let expected_offer = discovery.advance()?;
 
     let mut read_buf = [0; 100];
 
     // Search for Offer
     let offer_size = stream.read(&mut read_buf)?;
-    let offer = Message::from_bytes(&read_buf[..offer_size]);
-    offer.validate(Stage::Offer(None))?;
+    let offer = Handshake::from_bytes(&read_buf[..offer_size]);
+    offer.validate(Some(expected_offer))?;
     let offered_address = offer.get_addr()?;
-    info!("Received offer {offered_address}. Sending request");
+    info!("Received offer {offered_address} from server. Sending request");
 
     // Send request
-    stream.write_all(&mut dhc::Message::new(Stage::Request(offered_address)).to_bytes())?;
+    let request = offer.advance()?;
+    stream.write_all(&mut request.to_bytes())?;
 
     // Search for Acknowledgement
+    let expected_ack = request.advance()?;
     let ack_size = stream.read(&mut read_buf)?;
-    let acknowledgement = Message::from_bytes(&read_buf[..ack_size]);
-    acknowledgement.validate(Stage::Acknowledge(offered_address))?;
+    let acknowledgement = Handshake::from_bytes(&read_buf[..ack_size]);
+    acknowledgement.validate(Some(expected_ack))?;
     info!("Received acknowledgement. Initializing interface");
 
     // Initialize TUN interface
