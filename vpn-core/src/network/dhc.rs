@@ -85,6 +85,10 @@ impl Handshake {
         res
     }
 
+    pub fn is_rejection(&self) -> bool {
+        self.stage == Stage::Reject
+    }
+
     /// Consumes the current handshake state and
     /// advances the handshake to the next stage
     pub fn advance(self) -> io::Result<Self> {
