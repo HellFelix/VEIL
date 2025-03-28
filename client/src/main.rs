@@ -6,8 +6,11 @@ use std::{
 };
 
 use vpn_core::{
-    network::dhc::{self, Handshake, Stage},
-    utils::{logs::init_logger, shared::SERVER_ADDR, utun},
+    network::{
+        dhc::{self, Handshake, Stage},
+        SERVER_ADDR,
+    },
+    utils::{logs::init_logger, utun},
     TunInterface, MTU_SIZE,
 };
 
@@ -43,8 +46,9 @@ fn connect_to_server() -> io::Result<(TcpStream, TunInterface)> {
     let mut stream = TcpStream::connect(server_socket)?;
 
     let discovery = Handshake::initial_handshake();
+    let session_id = discovery.get_session_id();
     stream.write_all(&mut discovery.to_bytes())?;
-    info!("Sent discovery to server");
+    info!("Sent discovery to server with session ID: {session_id:#x}");
     let expected_offer = discovery.advance()?;
 
     let mut read_buf = [0; 100];

@@ -10,7 +10,7 @@ use crc32fast;
 use rand::{self, Rng};
 use serde::{Deserialize, Serialize};
 
-type SessionID = u128;
+type SessionID = u32;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
 pub enum Stage {

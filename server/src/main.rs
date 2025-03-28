@@ -4,8 +4,11 @@ use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream},
 };
 use vpn_core::{
-    network::dhc::{self, Handshake, Stage},
-    utils::{logs::init_logger, shared::SERVER_ADDR, utun},
+    network::{
+        dhc::{self, Handshake, Stage},
+        SERVER_ADDR,
+    },
+    utils::{logs::init_logger, utun},
     MTU_SIZE,
 };
 
@@ -51,13 +54,13 @@ fn run_server() -> io::Result<()> {
         let discovery = Handshake::from_bytes(&read_buf[..disc_size]);
         discovery.validate(None)?;
         let session_id = discovery.get_session_id();
-        info!("Received discovery from client {client_socket}. Session ID is {session_id:#10x}");
+        info!("Received discovery from client {client_socket}. Session ID is {session_id:#x}");
 
         // Offer IP
         let offered_addr = addr_pool.find_unclaimed()?;
         let mut offer = discovery.advance()?;
         offer.set_offer(offered_addr);
-        info!("Offering address {offered_addr} to client on {session_id:#10x}");
+        info!("Offering address {offered_addr} to client on session {session_id:#x}");
         s.write_all(&mut offer.to_bytes())?;
 
         // Check for request
@@ -65,7 +68,7 @@ fn run_server() -> io::Result<()> {
         let req_size = s.read(&mut read_buf)?;
         let request = Handshake::from_bytes(&read_buf[..req_size]);
         request.validate(Some(expected_request))?;
-        info!("Client on session {session_id:#10x} has sent approved request for address {offered_addr}. Sending Acknowledgement...");
+        info!("Client on session {session_id:#x} has sent approved request for address {offered_addr}. Sending Acknowledgement...");
 
         // Send Acknowledgement
         s.write_all(&request.advance()?.to_bytes())?;
