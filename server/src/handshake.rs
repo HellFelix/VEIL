@@ -1,5 +1,5 @@
 use std::{
-    io::{self, Read, Write},
+    io::{self, Error, ErrorKind, Read, Write},
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
 };
 
@@ -10,18 +10,21 @@ const BUF_SIZE: usize = 100;
 
 pub fn try_assign_address(
     addr_pool: &mut AddrPool,
+    session_registry: &mut SessionRegistry,
     stream: &mut TcpStream,
     client_socket: SocketAddrV4,
 ) -> Option<(Ipv4Addr, SessionID)> {
     let mut read_buf = [1; BUF_SIZE];
-    let (discovery, session_id) = match accept_discovery(stream, client_socket, &mut read_buf) {
-        Ok(res) => res,
-        Err(e) => {
-            warn!("Rejecting discovery from {client_socket} due to protocol violation: {e}");
-            stream.write_all(&mut Handshake::discovery_rejection(*client_socket.ip()).to_bytes());
-            return None;
-        }
-    };
+    let (discovery, session_id) =
+        match accept_discovery(stream, client_socket, session_registry, &mut read_buf) {
+            Ok(res) => res,
+            Err(e) => {
+                warn!("Rejecting discovery from {client_socket} due to protocol violation: {e}");
+                stream
+                    .write_all(&mut Handshake::discovery_rejection(*client_socket.ip()).to_bytes());
+                return None;
+            }
+        };
     match offeer_addr_protocol(discovery, session_id, addr_pool, stream) {
         Ok(addr) => Some((addr, session_id)),
         Err(e) => {
@@ -37,6 +40,7 @@ pub fn try_assign_address(
 fn accept_discovery(
     stream: &mut TcpStream,
     client_socket: SocketAddrV4,
+    session_registry: &mut SessionRegistry,
     read_buf: &mut [u8; BUF_SIZE],
 ) -> io::Result<(Handshake, SessionID)> {
     // Check for discovery
@@ -45,6 +49,7 @@ fn accept_discovery(
     discovery.validate(None)?;
     let session_id = discovery.get_session_id();
     info!("Received discovery from client {client_socket}. Session ID is {session_id:#x}");
+    session_registry.try_claim(session_id)?;
 
     Ok((discovery, session_id))
 }
@@ -74,4 +79,22 @@ fn offeer_addr_protocol(
     stream.write_all(&request.advance()?.to_bytes())?;
 
     Ok(offered_addr)
+}
+
+pub struct SessionRegistry(Vec<SessionID>);
+impl SessionRegistry {
+    pub fn create() -> Self {
+        Self(vec![])
+    }
+    pub fn try_claim(&mut self, entry: SessionID) -> io::Result<()> {
+        if self.0.contains(&entry) {
+            Err(Error::new(
+                ErrorKind::AlreadyExists,
+                format!("Client attempted to claim preexisting session ID {entry:#x}"),
+            ))
+        } else {
+            self.0.push(entry);
+            Ok(())
+        }
+    }
 }

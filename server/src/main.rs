@@ -1,3 +1,4 @@
+use handshake::SessionRegistry;
 use log::*;
 use std::{
     io::{self, Error, ErrorKind, Read, Write},
@@ -33,8 +34,10 @@ fn run_server() -> io::Result<()> {
     let server_socket = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8345);
     let listener = TcpListener::bind(SocketAddr::V4(server_socket))?;
     let mut addr_pool = dhc::AddrPool::create();
-
     addr_pool.claim(SERVER_ADDR)?;
+
+    let mut session_registry = SessionRegistry::create();
+    session_registry.try_claim(0)?;
 
     for stream in listener.incoming() {
         let mut s = stream?;
@@ -48,9 +51,12 @@ fn run_server() -> io::Result<()> {
         };
         info!("Client connected from socket {client_socket}");
 
-        if let Some((offered_addr, session_id)) =
-            handshake::try_assign_address(&mut addr_pool, &mut s, client_socket)
-        {
+        if let Some((offered_addr, session_id)) = handshake::try_assign_address(
+            &mut addr_pool,
+            &mut session_registry,
+            &mut s,
+            client_socket,
+        ) {
             addr_pool.claim(offered_addr)?;
 
             // Pass stream to forward traffic
