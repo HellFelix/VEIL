@@ -5,13 +5,14 @@ use std::{
 };
 use vpn_core::{
     network::{
-        dhc::{self, Handshake, Stage},
+        dhc::{self, Handshake, SessionID, Stage},
         SERVER_ADDR,
     },
     utils::{logs::init_logger, utun},
     MTU_SIZE,
 };
 
+mod handshake;
 mod icmp;
 use icmp::create_echo_reply;
 
@@ -47,38 +48,17 @@ fn run_server() -> io::Result<()> {
         };
         info!("Client connected from socket {client_socket}");
 
-        let mut read_buf = [0; 100];
+        if let Some((offered_addr, session_id)) =
+            handshake::try_assign_address(&mut addr_pool, &mut s, client_socket)
+        {
+            addr_pool.claim(offered_addr)?;
 
-        // Check for discovery
-        let disc_size = s.read(&mut read_buf)?;
-        let discovery = Handshake::from_bytes(&read_buf[..disc_size]);
-        discovery.validate(None)?;
-        let session_id = discovery.get_session_id();
-        info!("Received discovery from client {client_socket}. Session ID is {session_id:#x}");
+            // Pass stream to forward traffic
+            handle_client(s, session_id, SERVER_ADDR, offered_addr)?;
 
-        // Offer IP
-        let offered_addr = addr_pool.find_unclaimed()?;
-        let mut offer = discovery.advance()?;
-        offer.set_offer(offered_addr);
-        info!("Offering address {offered_addr} to client on session {session_id:#x}");
-        s.write_all(&mut offer.to_bytes())?;
-
-        // Check for request
-        let expected_request = offer.advance()?;
-        let req_size = s.read(&mut read_buf)?;
-        let request = Handshake::from_bytes(&read_buf[..req_size]);
-        request.validate(Some(expected_request))?;
-        info!("Client on session {session_id:#x} has sent approved request for address {offered_addr}. Sending Acknowledgement...");
-
-        // Send Acknowledgement
-        s.write_all(&request.advance()?.to_bytes())?;
-
-        addr_pool.claim(offered_addr)?;
-
-        // Pass stream to forward traffic
-        handle_client(s, client_socket, SERVER_ADDR, offered_addr)?;
-
-        addr_pool.release(offered_addr)?;
+            addr_pool.release(offered_addr)?;
+        }
+        // If an address could not be assigned, the client is dropped
     }
 
     Ok(())
@@ -86,7 +66,7 @@ fn run_server() -> io::Result<()> {
 
 fn handle_client(
     mut stream: TcpStream,
-    client_socket: SocketAddrV4,
+    session_id: SessionID,
     server_addr: Ipv4Addr,
     client_addr: Ipv4Addr,
 ) -> io::Result<()> {
@@ -96,7 +76,7 @@ fn handle_client(
     loop {
         let size = stream.read(&mut read_buf)?;
         if size == 0 {
-            info!("Client from {client_socket} disconnected!");
+            info!("Client with session {session_id:#x} disconnected!");
             return Ok(());
         }
 

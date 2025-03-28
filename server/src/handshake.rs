@@ -1,0 +1,77 @@
+use std::{
+    io::{self, Read, Write},
+    net::{Ipv4Addr, SocketAddrV4, TcpStream},
+};
+
+use log::*;
+use vpn_core::network::dhc::{AddrPool, Handshake, SessionID};
+
+const BUF_SIZE: usize = 100;
+
+pub fn try_assign_address(
+    addr_pool: &mut AddrPool,
+    stream: &mut TcpStream,
+    client_socket: SocketAddrV4,
+) -> Option<(Ipv4Addr, SessionID)> {
+    let mut read_buf = [1; BUF_SIZE];
+    let (discovery, session_id) = match accept_discovery(stream, client_socket, &mut read_buf) {
+        Ok(res) => res,
+        Err(e) => {
+            warn!("Rejecting discovery from {client_socket} due to protocol violation: {e}");
+            stream.write_all(&mut Handshake::discovery_rejection(*client_socket.ip()).to_bytes());
+            return None;
+        }
+    };
+    match offeer_addr_protocol(discovery, session_id, addr_pool, stream) {
+        Ok(addr) => Some((addr, session_id)),
+        Err(e) => {
+            warn!("Handshake with client on session {session_id:#x} failed due to protocol violation: {e}");
+            stream.write_all(
+                &mut Handshake::in_session_rejection(*client_socket.ip(), session_id).to_bytes(),
+            );
+            None
+        }
+    }
+}
+
+fn accept_discovery(
+    stream: &mut TcpStream,
+    client_socket: SocketAddrV4,
+    read_buf: &mut [u8; BUF_SIZE],
+) -> io::Result<(Handshake, SessionID)> {
+    // Check for discovery
+    let disc_size = stream.read(read_buf)?;
+    let discovery = Handshake::from_bytes(&read_buf[..disc_size]);
+    discovery.validate(None)?;
+    let session_id = discovery.get_session_id();
+    info!("Received discovery from client {client_socket}. Session ID is {session_id:#x}");
+
+    Ok((discovery, session_id))
+}
+
+fn offeer_addr_protocol(
+    discovery: Handshake,
+    session_id: SessionID,
+    addr_pool: &mut AddrPool,
+    stream: &mut TcpStream,
+) -> io::Result<Ipv4Addr> {
+    let mut read_buf = [0; 100];
+    // Offer IP
+    let offered_addr = addr_pool.find_unclaimed()?;
+    let mut offer = discovery.advance()?;
+    offer.set_offer(offered_addr);
+    info!("Offering address {offered_addr} to client on session {session_id:#x}");
+    stream.write_all(&mut offer.to_bytes())?;
+
+    // Check for request
+    let expected_request = offer.advance()?;
+    let req_size = stream.read(&mut read_buf)?;
+    let request = Handshake::from_bytes(&read_buf[..req_size]);
+    request.validate(Some(expected_request))?;
+    info!("Client on session {session_id:#x} has sent approved request for address {offered_addr}. Sending Acknowledgement...");
+
+    // Send Acknowledgement
+    stream.write_all(&request.advance()?.to_bytes())?;
+
+    Ok(offered_addr)
+}

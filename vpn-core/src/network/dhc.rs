@@ -10,7 +10,7 @@ use crc32fast;
 use rand::{self, Rng};
 use serde::{Deserialize, Serialize};
 
-type SessionID = u32;
+pub type SessionID = u32;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
 pub enum Stage {
@@ -54,6 +54,31 @@ impl Handshake {
             checksum: 0,
             session_id: rand::rng().random(),
             stage: Stage::Discover,
+        };
+        res.set_checksum();
+
+        res
+    }
+
+    pub fn discovery_rejection(client_source_address: Ipv4Addr) -> Self {
+        let mut res = Self {
+            address: Some(client_source_address),
+            checksum: 0,
+            session_id: 0,
+            stage: Stage::Reject,
+        };
+        res.set_checksum();
+
+        res
+    }
+
+    /// Creates a rejection message for a rejection after a session ID has been accepted
+    pub fn in_session_rejection(client_source_address: Ipv4Addr, session_id: SessionID) -> Self {
+        let mut res = Self {
+            address: Some(client_source_address),
+            checksum: 0,
+            session_id,
+            stage: Stage::Reject,
         };
         res.set_checksum();
 
