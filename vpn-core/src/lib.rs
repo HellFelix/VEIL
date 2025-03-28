@@ -6,10 +6,12 @@ use std::{
 };
 
 use libc::{
-    c_char, c_void, connect, ctl_info, getsockopt, ioctl, read, sockaddr, sockaddr_ctl, socklen_t,
-    ssize_t, write, AF_SYSTEM, CTLIOCGINFO, IFNAMSIZ, PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL,
-    UTUN_OPT_IFNAME,
+    c_char, c_void, close, connect, ctl_info, getsockopt, ioctl, read, sockaddr, sockaddr_ctl,
+    socklen_t, ssize_t, write, AF_SYSTEM, CTLIOCGINFO, IFNAMSIZ, PF_SYSTEM, SOCK_DGRAM,
+    SYSPROTO_CONTROL, UTUN_OPT_IFNAME,
 };
+
+use log::*;
 
 pub mod network;
 pub mod utils;
@@ -35,6 +37,14 @@ impl TunInterface {
             } else {
                 Ok(())
             }
+        }
+    }
+}
+impl Drop for TunInterface {
+    fn drop(&mut self) {
+        info!("Closing the {} interface.", self.name);
+        unsafe {
+            close(self.fd);
         }
     }
 }
