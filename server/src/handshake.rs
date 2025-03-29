@@ -6,12 +6,14 @@ use std::{
 use log::*;
 use vpn_core::network::dhc::{AddrPool, Handshake, SessionID};
 
+use crate::SecureStream;
+
 const BUF_SIZE: usize = 100;
 
 pub fn try_assign_address(
     addr_pool: &mut AddrPool,
     session_registry: &mut SessionRegistry,
-    stream: &mut TcpStream,
+    stream: &mut SecureStream,
     client_socket: SocketAddrV4,
 ) -> Option<(Ipv4Addr, SessionID)> {
     let mut read_buf = [1; BUF_SIZE];
@@ -38,7 +40,7 @@ pub fn try_assign_address(
 }
 
 fn accept_discovery(
-    stream: &mut TcpStream,
+    stream: &mut SecureStream,
     client_socket: SocketAddrV4,
     session_registry: &mut SessionRegistry,
     read_buf: &mut [u8; BUF_SIZE],
@@ -58,7 +60,7 @@ fn offeer_addr_protocol(
     discovery: Handshake,
     session_id: SessionID,
     addr_pool: &mut AddrPool,
-    stream: &mut TcpStream,
+    stream: &mut SecureStream,
 ) -> io::Result<Ipv4Addr> {
     let mut read_buf = [0; 100];
     // Offer IP

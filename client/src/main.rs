@@ -1,8 +1,18 @@
 use log::*;
+use rustls::{
+    client::WebPkiServerVerifier, pki_types::ServerName, version::TLS13, ClientConfig,
+    ClientConnection, ConnectionCommon, SideData, StreamOwned,
+};
 
 use std::{
     io::{self, Error, ErrorKind, Read, Write},
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream},
+    ops::{Deref, DerefMut},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{channel, Receiver, TryRecvError},
+        Arc,
+    },
 };
 
 use vpn_core::{
@@ -10,6 +20,7 @@ use vpn_core::{
         dhc::{self, Handshake, SessionID, Stage},
         SERVER_ADDR,
     },
+    utils::tls::*,
     utils::{logs::init_logger, utun},
     TunInterface, MTU_SIZE,
 };
@@ -28,6 +39,37 @@ fn init() -> io::Result<()> {
     Ok(())
 }
 
+struct SecureStream(StreamOwned<ClientConnection, TcpStream>);
+impl SecureStream {
+    pub fn new(conn: ClientConnection, sock: TcpStream) -> Self {
+        Self(StreamOwned::new(conn, sock))
+    }
+    pub fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.0.read(buf)
+    }
+    pub fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.0.write_all(buf)
+    }
+
+    fn shutdown(&mut self) -> io::Result<()> {
+        info!("Closing TLS connection");
+        self.0.conn.send_close_notify();
+
+        self.0.flush()?;
+
+        self.0.sock.shutdown(std::net::Shutdown::Both)?;
+
+        Ok(())
+    }
+}
+impl Drop for SecureStream {
+    fn drop(&mut self) {
+        if let Err(e) = self.shutdown() {
+            error!("Encountered error during shutdown: {e}");
+        }
+    }
+}
+
 #[derive(Debug)]
 #[toml_cfg::toml_config()]
 pub struct ServerConfig {
@@ -38,9 +80,10 @@ pub struct ServerConfig {
 }
 
 struct Client {
-    stream: TcpStream,
+    stream: SecureStream,
     session_id: SessionID,
     interface: TunInterface,
+    shutdown_flag: Receiver<()>,
 }
 impl Client {
     pub fn try_setup(mut retries: u8) -> io::Result<Self> {
@@ -64,7 +107,7 @@ impl Client {
 
     pub fn run_traffic(&mut self) -> io::Result<()> {
         let mut req_buf = [0; MTU_SIZE];
-        loop {
+        while let Err(TryRecvError::Empty) = self.shutdown_flag.try_recv() {
             if let Some(size) = self.interface.read(&mut req_buf) {
                 self.stream.write_all(&req_buf[..size as usize])?;
 
@@ -74,23 +117,35 @@ impl Client {
                 self.interface.write(&mut res_buf[..len])?;
             }
         }
+        info!("Shutting down gracefully");
+        Ok(())
     }
 }
 
 const BUF_SIZE: usize = 100;
 struct ClientSetup {
-    stream: TcpStream,
+    stream: SecureStream,
     session_id: Option<SessionID>,
     interface: Option<TunInterface>,
     read_buffer: [u8; BUF_SIZE],
 }
 impl ClientSetup {
     pub fn finilize(self) -> io::Result<Client> {
+        let (trigger, flag) = channel();
+
+        if let Err(e) = ctrlc::set_handler(move || {
+            println!("Got Keyboard interrupt. Shutting down");
+            trigger.send(());
+        }) {
+            warn!("Failed to set up graceful shutdown: {e}")
+        }
+
         if let (Some(session_id), Some(interface)) = (self.session_id, self.interface) {
             Ok(Client {
                 stream: self.stream,
                 session_id,
                 interface,
+                shutdown_flag: flag,
             })
         } else {
             Err(Error::new(
@@ -105,10 +160,18 @@ impl ClientSetup {
             Ipv4Addr::from_bits(server_config.address),
             server_config.port,
         );
-        info!("connecting to {server_socket}");
+        info!("Connecting to {server_socket}");
+        let raw_tcp_stream = TcpStream::connect(server_socket)?;
 
         let mut res = Self {
-            stream: TcpStream::connect(server_socket)?,
+            stream: SecureStream::new(
+                ClientConnection::new(
+                    Arc::new(get_tls_config()?),
+                    ServerName::try_from("VEIL").unwrap(),
+                )
+                .unwrap(),
+                raw_tcp_stream,
+            ),
             session_id: None,
             interface: None,
             read_buffer: [0; BUF_SIZE],
@@ -161,4 +224,15 @@ impl ClientSetup {
             Ok(res)
         }
     }
+}
+
+fn get_tls_config() -> io::Result<ClientConfig> {
+    let client_cert = load_certs("../certs/client.crt")?;
+    let client_key = load_private_key("../certs/client.key")?;
+    let roots = load_root_cert_store("../certs/rootCA.pem")?;
+
+    Ok(ClientConfig::builder_with_protocol_versions(&[&TLS13])
+        .with_root_certificates(roots)
+        .with_client_auth_cert(client_cert, client_key)
+        .unwrap())
 }

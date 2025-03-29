@@ -1,8 +1,11 @@
+use encryption::get_tls_config;
 use handshake::SessionRegistry;
 use log::*;
+use rustls::{ServerConnection, StreamOwned};
 use std::{
     io::{self, Error, ErrorKind, Read, Write},
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream},
+    sync::Arc,
 };
 use vpn_core::{
     network::{
@@ -13,9 +16,12 @@ use vpn_core::{
     MTU_SIZE,
 };
 
+mod encryption;
 mod handshake;
 mod icmp;
 use icmp::create_echo_reply;
+
+type SecureStream = StreamOwned<ServerConnection, TcpStream>;
 
 fn main() {
     match init() {
@@ -39,9 +45,11 @@ fn run_server() -> io::Result<()> {
     let mut session_registry = SessionRegistry::create();
     session_registry.try_claim(0)?;
 
+    let tls_config = get_tls_config()?;
+
     for stream in listener.incoming() {
-        let mut s = stream?;
-        let client_socket = if let SocketAddr::V4(sock_addr) = s.peer_addr()? {
+        let raw_tcp_stream = stream?;
+        let client_socket = if let SocketAddr::V4(sock_addr) = raw_tcp_stream.peer_addr()? {
             sock_addr
         } else {
             return Err(Error::new(
@@ -51,19 +59,25 @@ fn run_server() -> io::Result<()> {
         };
         info!("Client connected from socket {client_socket}");
 
+        let mut secure_stream = StreamOwned::new(
+            ServerConnection::new(Arc::new(tls_config.clone())).unwrap(),
+            raw_tcp_stream,
+        );
+
         if let Some((offered_addr, session_id)) = handshake::try_assign_address(
             &mut addr_pool,
             &mut session_registry,
-            &mut s,
+            &mut secure_stream,
             client_socket,
         ) {
             addr_pool.claim(offered_addr)?;
 
             // Pass stream to forward traffic
-            handle_client(s, session_id, SERVER_ADDR, offered_addr)?;
+            handle_client(&mut secure_stream, session_id, SERVER_ADDR, offered_addr)?;
 
             addr_pool.release(offered_addr)?;
         }
+
         // If an address could not be assigned, the client is dropped
     }
 
@@ -71,7 +85,7 @@ fn run_server() -> io::Result<()> {
 }
 
 fn handle_client(
-    mut stream: TcpStream,
+    stream: &mut SecureStream,
     session_id: SessionID,
     server_addr: Ipv4Addr,
     client_addr: Ipv4Addr,
