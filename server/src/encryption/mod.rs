@@ -1,15 +1,6 @@
-use std::{
-    io::{self, Error, ErrorKind},
-    net::TcpStream,
-    sync::Arc,
-};
+use std::{io, sync::Arc};
 
-use rustls::{
-    pki_types::{pem::PemObject, PrivateKeyDer},
-    server::{Acceptor, WebPkiClientVerifier},
-    version::TLS13,
-    ServerConfig,
-};
+use rustls::{server::WebPkiClientVerifier, version::TLS13, ServerConfig};
 
 use vpn_core::utils::tls::*;
 

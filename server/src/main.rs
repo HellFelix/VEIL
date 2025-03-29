@@ -9,7 +9,7 @@ use std::{
 };
 use vpn_core::{
     network::{
-        dhc::{self, Handshake, SessionID, Stage},
+        dhc::{self, SessionID},
         SERVER_ADDR,
     },
     utils::{logs::init_logger, utun},
