@@ -16,7 +16,7 @@ use vpn_core::utils::tls::*;
 pub fn get_tls_config() -> io::Result<ServerConfig> {
     let server_cert = load_certs("../certs/server.crt")?;
     let server_key = load_private_key("../certs/server.key")?;
-    let client_auth_roots = load_root_cert_store("../certs/rootCA.pem")?;
+    let client_auth_roots = load_root_cert_store("../certs/clientCA.pem")?;
 
     let verifier = WebPkiClientVerifier::builder(Arc::new(client_auth_roots))
         .build()
