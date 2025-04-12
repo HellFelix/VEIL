@@ -254,7 +254,7 @@ impl AddrPool {
     pub fn create() -> Self {
         Self(
             (1..=255)
-                .map(|i| Ipv4Addr::new(10, 0, 0, i).into())
+                .map(|i| Ipv4Addr::new(172, 0, 0, i).into())
                 .collect(),
         )
     }
