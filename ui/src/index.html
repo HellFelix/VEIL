@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>VEIL Client</title>
+    <base href="/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <style>
+    /* General App Styles */
+    body {
+      margin: 0;
+      font-family: 'Arial', sans-serif;
+      color: #;
+      height: 100vh;
+      display: flex;
+      align-items: stretch;
+
+      overflow-x: hidden;
+      overflow-y: hidden;
+    }
+
+    .app-container {
+      display: flex;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Selection Bar (left side) */
+    .selection-bar {
+      padding-top: 10px;
+      width: 220px;
+      background: #1c1c1c;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      box-shadow: 2px 0 5px rgba(0, 0, 0, 0.5);
+    }
+
+    .menu-item {
+      padding: 15px;
+      cursor: pointer;
+      width: 100%;
+      text-align: left;
+      font-size: 18px;
+      color: #B0B0B0;
+      border: none;
+      background: transparent;
+      transition: 0.3s;
+    }
+
+    .menu-item:hover {
+      color: #fff;
+      background: #1e1e3a;
+      border-radius: 5px;
+    }
+
+    /* Main Content Area */
+    .main-content {
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Toolbar (top bar) */
+    .toolbar {
+      background: #1e1e3a;
+      display: flex;
+      justify-content: flex-start;
+      align-items: center;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+    }
+
+    .toolbar-btn {
+      background: transparent;
+      color: #a0c4ff;
+      font-size: 1em;
+      border: 0px;
+      padding: 20px 30px;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+
+    .toolbar-btn:hover {
+      background: #2a2a3d;
+      color: #fff;
+    }
+
+    /* Content Area */
+    .content-area {
+      padding: 20px;
+      background: #1e1e3a;
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.6);
+    }
+
+    .content-area h1 {
+      color: #a0c4ff;
+      font-size: 36px;
+    }
+
+    .content-area p {
+      color: #ccc;
+      font-size: 18px;
+      text-align: center;
+    }
+  </style>
+  <body>
+    <div class="app-container">
+      <!-- Window selection bar -->
+      <div class="selection-bar">
+        <div class="menu-item">Dashboard</div>
+        <div class="menu-item">Settings</div>
+        <div class="menu-item">Routing</div>
+        <div class="menu-item">Logs</div>
+      </div>
+
+      <!-- Main app content -->
+      <div class="main-content">
+        <!-- Toolbar -->
+        <div class="toolbar">
+          <button class="toolbar-btn">Tool 1</button>
+          <button class="toolbar-btn">Tool 2</button>
+          <button class="toolbar-btn">Tool 3</button>
+        </div>
+
+        <!-- Content area -->
+        <div class="content-area">
+          <app-root></app-root>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
