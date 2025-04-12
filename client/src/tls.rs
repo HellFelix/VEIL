@@ -1,5 +1,5 @@
 use std::{
-    io::{self, Error, ErrorKind, Read, Write},
+    io::{Read, Write},
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
     sync::{mpsc::channel, Arc},
     thread::sleep,
@@ -15,9 +15,8 @@ use vpn_core::{
         dhc::{Handshake, SessionID},
         SERVER_ADDR,
     },
-    utils::tls::*,
-    utils::utun,
-    TunInterface,
+    tls::*,
+    utun, Error, ErrorKind, Result, TunInterface,
 };
 
 use crate::{Client, ServerConfig};
@@ -27,14 +26,14 @@ impl SecureStream {
     pub fn new(conn: ClientConnection, sock: TcpStream) -> Self {
         Self(StreamOwned::new(conn, sock))
     }
-    pub fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.0.read(buf)
+    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        Ok(self.0.read(buf)?)
     }
-    pub fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        self.0.write_all(buf)
+    pub fn write_all(&mut self, buf: &[u8]) -> Result<()> {
+        Ok(self.0.write_all(buf)?)
     }
 
-    fn shutdown(&mut self) -> io::Result<()> {
+    fn shutdown(&mut self) -> Result<()> {
         info!("Closing TLS connection");
         self.0.conn.send_close_notify();
 
@@ -53,7 +52,7 @@ impl Drop for SecureStream {
     }
 }
 
-fn get_tls_config() -> io::Result<ClientConfig> {
+fn get_tls_config() -> Result<ClientConfig> {
     let client_cert = load_certs("../certs/client.crt")?;
     let client_key = load_private_key("../certs/client.key")?;
     let roots = load_root_cert_store("../certs/rootCA.pem")?;
@@ -72,7 +71,7 @@ struct ClientSetup {
     read_buffer: [u8; BUF_SIZE],
 }
 impl ClientSetup {
-    pub fn finilize(self) -> io::Result<Client> {
+    pub fn finilize(self) -> Result<Client> {
         let (trigger, flag) = channel();
 
         if let Err(e) = ctrlc::set_handler(move || {
@@ -101,7 +100,7 @@ impl ClientSetup {
         }
     }
 
-    pub fn connect_to_server(server_config: ServerConfig) -> io::Result<Self> {
+    pub fn connect_to_server(server_config: ServerConfig) -> Result<Self> {
         let server_socket = SocketAddrV4::new(
             Ipv4Addr::from_bits(server_config.address),
             server_config.port,
@@ -128,7 +127,7 @@ impl ClientSetup {
         Ok(res)
     }
 
-    fn run_handshake_protocol(&mut self) -> io::Result<()> {
+    fn run_handshake_protocol(&mut self) -> Result<()> {
         let discovery = Handshake::initial_handshake();
         let session_id = discovery.get_session_id();
         self.stream.write_all(&mut discovery.to_bytes())?;
@@ -158,12 +157,12 @@ impl ClientSetup {
         Ok(())
     }
 
-    fn try_read_handshake(&mut self) -> io::Result<Handshake> {
+    fn try_read_handshake(&mut self) -> Result<Handshake> {
         let recv_size = self.stream.read(&mut self.read_buffer)?;
         let res = Handshake::from_bytes(&self.read_buffer[..recv_size]);
         if res.is_rejection() {
             Err(Error::new(
-                ErrorKind::PermissionDenied,
+                ErrorKind::Rejection,
                 format!("Handshake was rejected by server"),
             ))
         } else {
@@ -173,11 +172,11 @@ impl ClientSetup {
 }
 
 impl Client {
-    pub fn try_setup(mut retries: u8, server_config: ServerConfig) -> io::Result<Self> {
+    pub fn try_setup(mut retries: u8, server_config: ServerConfig) -> Result<Self> {
         loop {
             if retries == 0 {
                 break Err(Error::new(
-                    ErrorKind::TimedOut,
+                    ErrorKind::MaxRetry,
                     format!("Exceeded maximum retries while trying to connect"),
                 ));
             }

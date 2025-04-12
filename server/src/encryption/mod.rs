@@ -2,9 +2,10 @@ use std::{io, sync::Arc};
 
 use rustls::{server::WebPkiClientVerifier, version::TLS13, ServerConfig};
 
-use vpn_core::utils::tls::*;
+use vpn_core::tls::*;
+use vpn_core::Result;
 
-pub fn get_tls_config() -> io::Result<ServerConfig> {
+pub fn get_tls_config() -> Result<ServerConfig> {
     let server_cert = load_certs("../certs/server.crt")?;
     let server_key = load_private_key("../certs/server.key")?;
     let client_auth_roots = load_root_cert_store("../certs/clientCA.pem")?;

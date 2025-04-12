@@ -1,11 +1,8 @@
 use log::*;
 
-use std::{
-    io,
-    sync::mpsc::{Receiver, TryRecvError},
-};
+use std::sync::mpsc::{Receiver, TryRecvError};
 
-use vpn_core::{network::dhc::SessionID, utils::logs::init_logger, TunInterface, MTU_SIZE};
+use vpn_core::{logs::init_logger, network::dhc::SessionID, Result, TunInterface, MTU_SIZE};
 
 mod tls;
 use tls::SecureStream;
@@ -26,7 +23,7 @@ fn main() {
     }
 }
 
-fn init() -> io::Result<()> {
+fn init() -> Result<()> {
     init_logger("client", "info", false);
     let mut client = Client::try_setup(3, SERVER_CONFIG)?;
     client.run_traffic()?;
@@ -40,7 +37,7 @@ struct Client {
     shutdown_flag: Receiver<()>,
 }
 impl Client {
-    pub fn run_traffic(&mut self) -> io::Result<()> {
+    pub fn run_traffic(&mut self) -> Result<()> {
         let mut req_buf = [0; MTU_SIZE];
         while let Err(TryRecvError::Empty) = self.shutdown_flag.try_recv() {
             if let Some(size) = self.interface.read(&mut req_buf) {

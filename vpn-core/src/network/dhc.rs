@@ -1,14 +1,13 @@
 // This is a miniature protocol used for setting client IPs based on DCHP
 
-use std::{
-    io::{self, Error, ErrorKind},
-    net::{Ipv4Addr, SocketAddrV4},
-};
+use std::net::{Ipv4Addr, SocketAddrV4};
 
 use bincode;
 use crc32fast;
 use rand::{self, Rng};
 use serde::{Deserialize, Serialize};
+
+use crate::{Error, ErrorKind, Result};
 
 pub type SessionID = u32;
 
@@ -21,17 +20,17 @@ pub enum Stage {
     Reject,
 }
 impl Stage {
-    pub fn next_stage(self) -> io::Result<Self> {
+    pub fn next_stage(self) -> Result<Self> {
         match self {
             Self::Discover => Ok(Self::Offer),
             Self::Offer => Ok(Self::Request),
             Self::Request => Ok(Self::Acknowledge),
             Self::Acknowledge => Err(Error::new(
-                ErrorKind::Unsupported,
+                ErrorKind::UnsupportedAction,
                 format!("There is no next stage for the handshake after acknowledgement"),
             )),
             Self::Reject => Err(Error::new(
-                ErrorKind::Unsupported,
+                ErrorKind::Rejection,
                 format!("The handshake cannot proceed, because it has been rejected"),
             )),
         }
@@ -91,7 +90,7 @@ impl Handshake {
 
     /// Consumes the current handshake state and
     /// advances the handshake to the next stage
-    pub fn advance(self) -> io::Result<Self> {
+    pub fn advance(self) -> Result<Self> {
         let mut res = Self {
             address: self.address,
             checksum: 0,
@@ -117,7 +116,7 @@ impl Handshake {
         bincode::serialize(&self).unwrap()
     }
 
-    pub fn validate(&self, expected: Option<Self>) -> io::Result<()> {
+    pub fn validate(&self, expected: Option<Self>) -> Result<()> {
         if match self.stage {
             Stage::Discover => self.validate_discovery(Self::discovery_validator()),
             Stage::Offer => self.validate_offer(unwrap_handshake(expected)?),
@@ -157,7 +156,7 @@ impl Handshake {
             && self.session_id == expected.session_id
     }
 
-    pub fn get_addr(&self) -> io::Result<Ipv4Addr> {
+    pub fn get_addr(&self) -> Result<Ipv4Addr> {
         if let Some(addr) = self.address {
             Ok(addr)
         } else {
@@ -186,7 +185,7 @@ impl Handshake {
     }
 }
 
-pub fn unwrap_handshake(value: Option<Handshake>) -> io::Result<Handshake> {
+pub fn unwrap_handshake(value: Option<Handshake>) -> Result<Handshake> {
     if let Some(handshake) = value {
         Ok(handshake)
     } else {
@@ -202,10 +201,10 @@ pub struct Address {
     claimed: bool,
 }
 impl Address {
-    pub fn claim(&mut self) -> io::Result<()> {
+    pub fn claim(&mut self) -> Result<()> {
         if self.claimed {
             Err(Error::new(
-                ErrorKind::AddrInUse,
+                ErrorKind::AddressClaimed,
                 format!(
                     "Attempted to claim address {}, but it is already claimed",
                     self.addr
@@ -217,7 +216,7 @@ impl Address {
         }
     }
 
-    pub fn unclaim(&mut self) -> io::Result<()> {
+    pub fn unclaim(&mut self) -> Result<()> {
         if self.claimed {
             self.claimed = false;
             Ok(())
@@ -259,7 +258,7 @@ impl AddrPool {
         )
     }
 
-    pub fn find_unclaimed(&self) -> io::Result<Ipv4Addr> {
+    pub fn find_unclaimed(&self) -> Result<Ipv4Addr> {
         let mut addresses = self.0.iter();
         while let Some(addr) = addresses.next() {
             if !addr.is_claimed() {
@@ -267,19 +266,19 @@ impl AddrPool {
             }
         }
         Err(Error::new(
-            ErrorKind::WouldBlock,
+            ErrorKind::Depleted,
             format!("All addresses have been claimed!"),
         ))
     }
 
     /// Claim the selected address
-    pub fn claim(&mut self, addr: Ipv4Addr) -> io::Result<()> {
+    pub fn claim(&mut self, addr: Ipv4Addr) -> Result<()> {
         self.0[addr.octets()[3] as usize - 1].claim()?;
         Ok(())
     }
 
     /// Release the selected address so that it could be reused
-    pub fn release(&mut self, addr: Ipv4Addr) -> io::Result<()> {
+    pub fn release(&mut self, addr: Ipv4Addr) -> Result<()> {
         self.0[addr.octets()[3] as usize - 1].unclaim()?;
         Ok(())
     }

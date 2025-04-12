@@ -1,10 +1,11 @@
 use std::{
-    io::{self, Error, ErrorKind, Read, Write},
+    io::{Read, Write},
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
 };
 
 use log::*;
 use vpn_core::network::dhc::{AddrPool, Handshake, SessionID};
+use vpn_core::{Error, ErrorKind, Result};
 
 use crate::SecureStream;
 
@@ -44,7 +45,7 @@ fn accept_discovery(
     client_socket: SocketAddrV4,
     session_registry: &mut SessionRegistry,
     read_buf: &mut [u8; BUF_SIZE],
-) -> io::Result<(Handshake, SessionID)> {
+) -> Result<(Handshake, SessionID)> {
     // Check for discovery
     let disc_size = stream.read(read_buf)?;
     let discovery = Handshake::from_bytes(&read_buf[..disc_size]);
@@ -61,7 +62,7 @@ fn offeer_addr_protocol(
     session_id: SessionID,
     addr_pool: &mut AddrPool,
     stream: &mut SecureStream,
-) -> io::Result<Ipv4Addr> {
+) -> Result<Ipv4Addr> {
     let mut read_buf = [0; 100];
     // Offer IP
     let offered_addr = addr_pool.find_unclaimed()?;
@@ -88,7 +89,7 @@ impl SessionRegistry {
     pub fn create() -> Self {
         Self(vec![])
     }
-    pub fn try_claim(&mut self, entry: SessionID) -> io::Result<()> {
+    pub fn try_claim(&mut self, entry: SessionID) -> Result<()> {
         if self.0.contains(&entry) {
             Err(Error::new(
                 ErrorKind::AlreadyExists,

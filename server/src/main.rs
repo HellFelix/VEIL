@@ -3,17 +3,17 @@ use handshake::SessionRegistry;
 use log::*;
 use rustls::{ServerConnection, StreamOwned};
 use std::{
-    io::{self, Error, ErrorKind, Read, Write},
+    io::{Read, Write},
     net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream},
     sync::Arc,
 };
 use vpn_core::{
+    logs::init_logger,
     network::{
         dhc::{self, SessionID},
         SERVER_ADDR,
     },
-    utils::{logs::init_logger, utun},
-    MTU_SIZE,
+    utun, Error, ErrorKind, Result, MTU_SIZE,
 };
 
 mod encryption;
@@ -30,13 +30,13 @@ fn main() {
     }
 }
 
-fn init() -> io::Result<()> {
+fn init() -> Result<()> {
     init_logger("server", "info", true);
     run_server()?;
     Ok(())
 }
 
-fn run_server() -> io::Result<()> {
+fn run_server() -> Result<()> {
     let server_socket = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8345);
     let listener = TcpListener::bind(SocketAddr::V4(server_socket))?;
     let mut addr_pool = dhc::AddrPool::create();
@@ -53,7 +53,7 @@ fn run_server() -> io::Result<()> {
             sock_addr
         } else {
             return Err(Error::new(
-                ErrorKind::Unsupported,
+                ErrorKind::UnsupportedProtocol,
                 format!("Server only supports Ipv4"),
             ));
         };
@@ -89,7 +89,7 @@ fn handle_client(
     session_id: SessionID,
     server_addr: Ipv4Addr,
     client_addr: Ipv4Addr,
-) -> io::Result<()> {
+) -> Result<()> {
     let mut read_buf = [0; MTU_SIZE];
     let interface = utun::setup(server_addr, client_addr)?;
 

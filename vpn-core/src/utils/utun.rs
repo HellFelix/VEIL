@@ -1,9 +1,9 @@
 use log::*;
-use std::{io, net::Ipv4Addr, process};
+use std::{net::Ipv4Addr, process};
 
-use crate::{open_utun, TunInterface};
+use crate::{open_utun, Result, TunInterface};
 
-pub fn setup(interface_ip: Ipv4Addr, peer_ip: Ipv4Addr) -> io::Result<TunInterface> {
+pub fn setup(interface_ip: Ipv4Addr, peer_ip: Ipv4Addr) -> Result<TunInterface> {
     let interface = unsafe { open_utun()? };
     info!("Successfully initialized {} interface", interface.name);
 

@@ -14,7 +14,12 @@ use libc::{
 use log::*;
 
 pub mod network;
-pub mod utils;
+mod utils;
+
+pub use utils::{
+    error::{Error, ErrorKind, Result},
+    logs, tls, utun,
+};
 
 pub const MTU_SIZE: usize = 1504;
 /// Represents a successfully opened TUN interface.
@@ -30,10 +35,10 @@ impl TunInterface {
         }
     }
 
-    pub fn write(&self, buf: &mut [u8]) -> io::Result<()> {
+    pub fn write(&self, buf: &mut [u8]) -> Result<()> {
         unsafe {
             if write(self.fd, buf.as_mut_ptr() as *mut c_void, buf.len()) < 0 {
-                return Err(io::Error::last_os_error());
+                return Err(io::Error::last_os_error().into());
             } else {
                 Ok(())
             }
@@ -49,11 +54,11 @@ impl Drop for TunInterface {
     }
 }
 
-pub unsafe fn open_utun() -> io::Result<TunInterface> {
+pub unsafe fn open_utun() -> Result<TunInterface> {
     // 1. Create the system socket
     let fd = libc::socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
     if fd < 0 {
-        return Err(io::Error::last_os_error());
+        return Err(io::Error::last_os_error().into());
     }
 
     // 2. Prepare control info to resolve "com.apple.net.utun_control"
@@ -68,7 +73,7 @@ pub unsafe fn open_utun() -> io::Result<TunInterface> {
 
     let ioctl_result = unsafe { ioctl(fd, CTLIOCGINFO, &mut info) };
     if ioctl_result < 0 {
-        return Err(io::Error::last_os_error());
+        return Err(io::Error::last_os_error().into());
     }
 
     // 3. Request dynamic assignment (sc_unit = 0)
@@ -89,7 +94,7 @@ pub unsafe fn open_utun() -> io::Result<TunInterface> {
     };
 
     if connect_result < 0 {
-        return Err(io::Error::last_os_error());
+        return Err(io::Error::last_os_error().into());
     }
 
     let mut ifname_buf = [0u8; IFNAMSIZ];
@@ -101,7 +106,7 @@ pub unsafe fn open_utun() -> io::Result<TunInterface> {
         &mut (IFNAMSIZ as socklen_t),
     );
     if get_sock_res < 0 {
-        return Err(io::Error::last_os_error());
+        return Err(io::Error::last_os_error().into());
     }
 
     Ok(TunInterface {
