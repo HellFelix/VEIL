@@ -1,2 +1,42 @@
 <main>
+  <div class="app-container">
+  <!-- Window selection bar -->
+  <div class="selection-bar">
+    <label class="menu-item">
+      <input type="radio" name="menu" value="dashboard" [(ngModel)]="selectedView" (change)="onViewChange()" checked="true" />
+      <div class="menu-item-content"><span>Dashboard</span></div>
+    </label>
+    <label class="menu-item">
+      <input type="radio" name="menu" value="settings" [(ngModel)]="selectedView" (change)="onViewChange()" />
+      <div class="menu-item-content"><span>Settings</span></div>
+    </label>
+    <label class="menu-item">
+      <input type="radio" name="menu" value="routing" [(ngModel)]="selectedView" (change)="onViewChange()" />
+      <div class="menu-item-content"><span>Routing</span></div>
+    </label>
+    <label class="menu-item">
+      <input type="radio" name="menu" value="logs" [(ngModel)]="selectedView" (change)="onViewChange()" />
+      <div class="menu-item-content"><span>Logs</span></div>
+    </label>
+  </div>
+
+  <!-- Main app content -->
+  <div class="main-content">
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <button class="toolbar-btn">Tool 1</button>
+      <button class="toolbar-btn">Tool 2</button>
+      <button class="toolbar-btn">Tool 3</button>
+      <label class="switch">
+        <input type="checkbox" [(ngModel)]="mainSwitchActive" (change)="onMainSwitchChange()">
+        <span class="slider round"></span>
+      </label>
+    </div>
+
+    <!-- Content area -->
+    <div class="content-area">
+      <ng-container *ngComponentOutlet="currentView"></ng-container>
+    </div>
+  </div>
+</div>
 </main>
