@@ -38,21 +38,43 @@
     }
 
     .menu-item {
-      padding: 15px;
       cursor: pointer;
       width: 100%;
       text-align: left;
       font-size: 18px;
-      color: #B0B0B0;
+      color: #95959f;
       border: none;
       background: transparent;
+      position: relative;
+      display: flex;
+      align-items: center;
       transition: 0.3s;
     }
+    .menu-item input[type="radio"] {
+        opacity: 0; /* Hide the default radio button */
+        position: absolute;
+    }
+    
+    input[type="radio"]:checked + div {
+      background: #0a0a0a;
+      background: linear-gradient(0deg, rgba(10, 10, 10, 1) 0%, rgba(28, 28, 28, 1) 72%);
+      color: #00c9ff; /* Change text color */
+      padding-left: 2em;
+    }
 
-    .menu-item:hover {
-      color: #fff;
-      background: #1e1e3a;
-      border-radius: 5px;
+      /* Hover Effect for Menu Items */
+    .menu-item-content:hover {
+        color: #fff;
+        background: #1e1e3a;
+        border-radius: 5px;
+    }
+
+    .menu-item-content {
+      width: 100%;
+      padding: 1em;
+
+      display: flex;
+      align-items: center;
     }
 
     /* Main Content Area */
@@ -68,7 +90,6 @@
       display: flex;
       justify-content: flex-start;
       align-items: center;
-      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
     }
 
     .toolbar-btn {
@@ -108,15 +129,34 @@
       font-size: 18px;
       text-align: center;
     }
+
+    /* .veil-icon { */
+    /*     width: 24px; */
+    /*     height: 24px; */
+    /*     background-image: url('assets/VEIL_logo_no_background2.png'); */
+    /*     background-size: cover; /*
+    /* } */
   </style>
   <body>
     <div class="app-container">
       <!-- Window selection bar -->
       <div class="selection-bar">
-        <div class="menu-item">Dashboard</div>
-        <div class="menu-item">Settings</div>
-        <div class="menu-item">Routing</div>
-        <div class="menu-item">Logs</div>
+        <label class="menu-item">
+          <input type="radio" name="menu" id="dashboard" checked="true" />
+          <div class="menu-item-content"><span>Dashboard</span></div>
+        </label>
+        <label class="menu-item">
+          <input type="radio" name="menu" id="settings" />
+          <div class="menu-item-content"><span>Settings</span></div>
+        </label>
+        <label class="menu-item">
+          <input type="radio" name="menu" id="routing" />
+          <div class="menu-item-content"><span>Routing</span></div>
+        </label>
+        <label class="menu-item">
+          <input type="radio" name="menu" id="logs" />
+          <div class="menu-item-content"><span>Logs</span></div>
+        </label>
       </div>
 
       <!-- Main app content -->
