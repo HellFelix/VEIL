@@ -1,6 +1,9 @@
 use log::*;
 
-use std::sync::mpsc::{Receiver, TryRecvError};
+use std::{
+    io,
+    sync::mpsc::{Receiver, TryRecvError},
+};
 
 use vpn_core::{logs::init_logger, network::dhc::SessionID, Result, TunInterface, MTU_SIZE};
 
@@ -26,7 +29,11 @@ fn main() {
 fn init() -> Result<()> {
     init_logger("client", "info", false);
     let mut client = Client::try_setup(3, SERVER_CONFIG)?;
-    client.run_traffic()?;
+    if let Err(e) = client.run_traffic() {
+        // Catch and log without interruping shut down process
+        error!("{e}");
+    }
+    info!("Shutting down gracefully");
     Ok(())
 }
 
@@ -40,7 +47,7 @@ impl Client {
     pub fn run_traffic(&mut self) -> Result<()> {
         let mut req_buf = [0; MTU_SIZE];
         while let Err(TryRecvError::Empty) = self.shutdown_flag.try_recv() {
-            if let Some(size) = self.interface.read(&mut req_buf) {
+            if let Some(size) = self.interface.read(&mut req_buf)? {
                 self.stream.write_all(&req_buf[..size as usize])?;
 
                 let mut res_buf = [0; MTU_SIZE];
@@ -49,7 +56,6 @@ impl Client {
                 self.interface.write(&mut res_buf[..len])?;
             }
         }
-        info!("Shutting down gracefully");
         Ok(())
     }
 }

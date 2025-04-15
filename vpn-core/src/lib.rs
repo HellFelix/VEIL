@@ -6,9 +6,9 @@ use std::{
 };
 
 use libc::{
-    c_char, c_void, close, connect, ctl_info, getsockopt, ioctl, read, sockaddr, sockaddr_ctl,
-    socklen_t, ssize_t, write, AF_SYSTEM, CTLIOCGINFO, IFNAMSIZ, PF_SYSTEM, SOCK_DGRAM,
-    SYSPROTO_CONTROL, UTUN_OPT_IFNAME,
+    c_char, c_void, close, connect, ctl_info, getsockopt, ioctl, poll, pollfd, read, sockaddr,
+    sockaddr_ctl, socklen_t, ssize_t, write, AF_SYSTEM, CTLIOCGINFO, IFNAMSIZ, PF_SYSTEM, POLLIN,
+    SOCK_DGRAM, SYSPROTO_CONTROL, UTUN_OPT_IFNAME,
 };
 
 use log::*;
@@ -28,10 +28,26 @@ pub struct TunInterface {
     pub name: String,
 }
 impl TunInterface {
-    pub fn read(&self, buf: &mut [u8; MTU_SIZE]) -> Option<ssize_t> {
+    pub fn read(&self, buf: &mut [u8; MTU_SIZE]) -> Result<Option<ssize_t>> {
         unsafe {
-            let res = read(self.fd, buf.as_mut_ptr() as *mut c_void, MTU_SIZE);
-            return if res > 0 { Some(res) } else { None };
+            let mut fds = [pollfd {
+                fd: self.fd,
+                events: POLLIN,
+                revents: 0,
+            }];
+
+            let result = poll(fds.as_mut_ptr(), 1, 1);
+
+            if result < 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+
+            if fds[0].revents & POLLIN != 0 {
+                let res = read(self.fd, buf.as_mut_ptr() as *mut c_void, MTU_SIZE);
+                Ok(if res > 0 { Some(res) } else { None })
+            } else {
+                Ok(None)
+            }
         }
     }
 

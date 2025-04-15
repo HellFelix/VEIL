@@ -80,7 +80,6 @@ impl ClientSetup {
 
             sleep(Duration::from_millis(500));
             info!("Graceful shutdown failed within permitted time.");
-            panic!("Force shutdown from keyboard interrupt");
         }) {
             warn!("Failed to set up graceful shutdown: {e}")
         }
