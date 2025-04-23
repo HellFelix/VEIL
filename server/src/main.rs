@@ -13,7 +13,9 @@ use vpn_core::{
         dhc::{self, SessionID},
         SERVER_ADDR,
     },
-    utun, Error, ErrorKind, Result, MTU_SIZE,
+    system::setup,
+    system::MTU_SIZE,
+    Error, ErrorKind, Result,
 };
 
 mod encryption;
@@ -91,7 +93,7 @@ fn handle_client(
     client_addr: Ipv4Addr,
 ) -> Result<()> {
     let mut read_buf = [0; MTU_SIZE];
-    let interface = utun::setup(server_addr, client_addr)?;
+    //let interface = setup(server_addr, client_addr)?;
 
     loop {
         let size = stream.read(&mut read_buf)?;
@@ -100,9 +102,14 @@ fn handle_client(
             return Ok(());
         }
 
+        println!("Received {size} bytes");
+        println!("{:?}", &read_buf[..size]);
         // forward packet
 
-        let mut res = create_echo_reply(&read_buf[..size]).unwrap();
-        stream.write_all(&mut res)?;
+        if let Some(mut res) = create_echo_reply(&read_buf[..size]) {
+            stream.write_all(&mut res)?;
+        } else {
+            info!("Failed to create echo reply");
+        }
     }
 }

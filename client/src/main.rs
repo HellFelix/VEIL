@@ -1,11 +1,14 @@
 use log::*;
+use pnet::packet::ipv4::Ipv4Packet;
 
 use std::{
     io,
     sync::mpsc::{Receiver, TryRecvError},
 };
 
-use vpn_core::{logs::init_logger, network::dhc::SessionID, Result, TunInterface, MTU_SIZE};
+use vpn_core::{
+    logs::init_logger, network::dhc::SessionID, system::TunInterface, system::MTU_SIZE, Result,
+};
 
 mod tls;
 use tls::SecureStream;
@@ -48,12 +51,18 @@ impl Client {
         let mut req_buf = [0; MTU_SIZE];
         while let Err(TryRecvError::Empty) = self.shutdown_flag.try_recv() {
             if let Some(size) = self.interface.read(&mut req_buf)? {
-                self.stream.write_all(&req_buf[..size as usize])?;
+                let packet = Ipv4Packet::new(&req_buf[..size as usize]).unwrap();
+                if packet.get_source() == self.interface.local_addr {
+                    info!("Found echo!");
+                    self.stream.write_all(&req_buf[..size as usize])?;
 
-                let mut res_buf = [0; MTU_SIZE];
-                let len = self.stream.read(&mut res_buf)?;
-                info!("Received {len} bytes");
-                self.interface.write(&mut res_buf[..len])?;
+                    let mut res_buf = [0; MTU_SIZE];
+                    let len = self.stream.read(&mut res_buf)?;
+                    info!("Received {len} bytes");
+                    self.interface.write(&mut res_buf[..len])?;
+                } else {
+                    info!("Found non-echo");
+                }
             }
         }
         Ok(())

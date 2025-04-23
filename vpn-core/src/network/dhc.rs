@@ -1,6 +1,6 @@
 // This is a miniature protocol used for setting client IPs based on DCHP
 
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::Ipv4Addr;
 
 use bincode;
 use crc32fast;
@@ -253,7 +253,7 @@ impl AddrPool {
     pub fn create() -> Self {
         Self(
             (1..=255)
-                .map(|i| Ipv4Addr::new(172, 0, 0, i).into())
+                .map(|i| Ipv4Addr::new(172, 16, 0, i).into())
                 .collect(),
         )
     }

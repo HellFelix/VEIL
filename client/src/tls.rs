@@ -15,8 +15,9 @@ use vpn_core::{
         dhc::{Handshake, SessionID},
         SERVER_ADDR,
     },
+    system::{setup, TunInterface},
     tls::*,
-    utun, Error, ErrorKind, Result, TunInterface,
+    Error, ErrorKind, Result,
 };
 
 use crate::{Client, ServerConfig};
@@ -151,7 +152,7 @@ impl ClientSetup {
 
         // Set session ID and initialize utun intereface
         self.session_id = Some(session_id);
-        self.interface = Some(utun::setup(offered_address, SERVER_ADDR)?);
+        self.interface = Some(setup(offered_address, SERVER_ADDR)?);
 
         Ok(())
     }

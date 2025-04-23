@@ -10,7 +10,12 @@ use pnet::packet::{
 pub fn create_echo_reply(incoming: &[u8]) -> Option<Vec<u8>> {
     let mut incoming = incoming.to_owned();
 
+    #[cfg(target_os = "macos")]
+    // Packets on the utun interface have a 4-byte header
     let mut ipv4_header = MutableIpv4Packet::new(&mut incoming[4..])?;
+
+    #[cfg(target_os = "linux")]
+    let mut ipv4_header = MutableIpv4Packet::new(&mut incoming[..])?;
     let icmp_request = EchoRequestPacket::new(ipv4_header.payload())?;
 
     let mut icmp_buffer = vec![0; ipv4_header.payload().len()];
