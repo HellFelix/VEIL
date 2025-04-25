@@ -110,7 +110,7 @@ fn handle_client(
     let mut read_buf = [0; MTU_SIZE];
     //let interface = setup(server_addr, client_addr)?;
 
-    let mut server_port: Option<u16> = None;
+    let server_port = 53555;
     loop {
         let size = stream.read(&mut read_buf)?;
         if size == 0 {
@@ -129,7 +129,7 @@ fn handle_client(
                 Ipv4Addr::new(192, 168, 1, 69),
                 &mut read_buf[..size],
                 client_addr,
-                &mut server_port,
+                server_port,
             )
             .unwrap()
         } else if read_buf[9] == 1 {
@@ -153,13 +153,12 @@ fn connect_tcp(
     host_ip: Ipv4Addr,
     packet: &mut [u8],
     peer_ip: Ipv4Addr,
-    server_eph_port: &mut Option<u16>,
+    server_eph_port: u16,
 ) -> Result<Option<Vec<u8>>> {
     unsafe {
         if let Some((spoofed_packet, dst_ip, eph_port)) =
-            spoof_tcp(packet, host_ip, *server_eph_port)
+            spoof_tcp(packet, host_ip, server_eph_port)
         {
-            *server_eph_port = Some(eph_port);
             println!("Spoofed is {spoofed_packet:?}");
             let sock_r = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
 
@@ -248,18 +247,14 @@ fn connect_tcp(
 fn spoof_tcp(
     buf: &mut [u8],
     src_ip: Ipv4Addr,
-    server_eph_port: Option<u16>,
+    server_eph_port: u16,
 ) -> Option<(Vec<u8>, Ipv4Addr, u16)> {
     let mut packet = MutableIpv4Packet::new(buf)?;
 
     let mut tcp_part = packet.payload().to_owned().clone();
     let mut tcp_packet = MutableTcpPacket::new(&mut tcp_part)?;
     let eph_port = tcp_packet.get_source();
-    if let Some(port) = server_eph_port {
-        //tcp_packet.set_source(port);
-    } else {
-        tcp_packet.set_source(rand::rng().random_range(49152..=65535));
-    }
+    tcp_packet.set_source(server_eph_port);
     let tcp_checksum = tcp::ipv4_checksum(
         &TcpPacket::new(tcp_packet.packet())?,
         &src_ip,
