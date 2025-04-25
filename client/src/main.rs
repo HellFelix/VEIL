@@ -51,18 +51,14 @@ impl Client {
         let mut req_buf = [0; MTU_SIZE];
         while let Err(TryRecvError::Empty) = self.shutdown_flag.try_recv() {
             if let Some(size) = self.interface.read(&mut req_buf)? {
-                let packet = Ipv4Packet::new(&req_buf[..size as usize]).unwrap();
-                if packet.get_source() == self.interface.local_addr {
-                    info!("Found echo!");
-                    self.stream.write_all(&req_buf[..size as usize])?;
+                self.stream.write_all(&req_buf[4..size as usize])?;
+                info!("Forwarding {:?}", &req_buf[..size as usize]);
 
-                    let mut res_buf = [0; MTU_SIZE];
-                    let len = self.stream.read(&mut res_buf)?;
-                    info!("Received {len} bytes");
-                    self.interface.write(&mut res_buf[..len])?;
-                } else {
-                    info!("Found non-echo");
-                }
+                let mut res_buf = [0; MTU_SIZE];
+                let len = self.stream.read(&mut res_buf[4..])?;
+                res_buf[3] = 2;
+                info!("Got {:?}", &res_buf[..len + 4]);
+                self.interface.write(&mut res_buf[..4 + len])?;
             }
         }
         Ok(())

@@ -2,6 +2,7 @@ use std::{
     ffi::{CStr, CString},
     io,
     mem::{self, zeroed},
+    net::Ipv4Addr,
     os::fd::RawFd,
 };
 
@@ -16,7 +17,10 @@ use crate::utils::error::Result;
 
 pub const MTU_SIZE: usize = 1504;
 
-pub unsafe fn open_raw_interface() -> Result<TunInterface> {
+pub unsafe fn open_raw_interface(
+    local_addr: Ipv4Addr,
+    peer_addr: Ipv4Addr,
+) -> Result<TunInterface> {
     // 1. Create the system socket
     let fd = libc::socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
     if fd < 0 {
@@ -77,5 +81,7 @@ pub unsafe fn open_raw_interface() -> Result<TunInterface> {
             .to_str()
             .unwrap()
             .to_string(),
+        local_addr,
+        peer_addr,
     })
 }

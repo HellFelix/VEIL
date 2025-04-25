@@ -11,12 +11,13 @@ use crate::utils::error::Result;
 mod unix;
 
 #[cfg(target_os = "macos")]
-pub use unix::macos::MTU_SIZE;
+use unix::macos::open_raw_interface;
 #[cfg(target_os = "macos")]
-use unix::macos::{open_raw_interface, utun};
+pub use unix::macos::MTU_SIZE;
 
 #[cfg(target_os = "linux")]
 use unix::linux::open_tun_interface;
+#[cfg(target_os = "linux")]
 pub use unix::linux::MTU_SIZE;
 
 pub struct TunInterface {
@@ -69,14 +70,29 @@ impl Drop for TunInterface {
 }
 
 pub fn setup(interface_ip: Ipv4Addr, peer_ip: Ipv4Addr) -> Result<TunInterface> {
+    #[cfg(target_os = "linux")]
     let interface = open_tun_interface(Some("tun0"), interface_ip, peer_ip)?;
+    #[cfg(target_os = "macos")]
+    let interface = unsafe { open_raw_interface(interface_ip, peer_ip)? };
+
     info!("Successfully initialized {} interface", interface.name);
 
+    #[cfg(target_os = "linux")]
     process::Command::new("ifconfig")
         .args([
             interface.name.clone(),
             format!("{interface_ip}"),
             String::from("pointopoint"),
+            format!("{peer_ip}"),
+            String::from("up"),
+        ])
+        .status()
+        .unwrap();
+    #[cfg(target_os = "macos")]
+    process::Command::new("ifconfig")
+        .args([
+            interface.name.clone(),
+            format!("{interface_ip}"),
             format!("{peer_ip}"),
             String::from("up"),
         ])
