@@ -20,6 +20,7 @@ use unix::linux::open_tun_interface;
 #[cfg(target_os = "linux")]
 pub use unix::linux::MTU_SIZE;
 
+#[derive(Clone)]
 pub struct TunInterface {
     pub fd: RawFd,
     pub name: String,
