@@ -4,6 +4,7 @@ use std::{
 };
 
 use log::*;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use vpn_core::network::dhc::{AddrPool, Handshake, SessionID};
 use vpn_core::{Error, ErrorKind, Result};
 
@@ -11,7 +12,7 @@ use crate::SecureStream;
 
 const BUF_SIZE: usize = 100;
 
-pub fn try_assign_address(
+pub async fn try_assign_address(
     addr_pool: &mut AddrPool,
     session_registry: &mut SessionRegistry,
     stream: &mut SecureStream,
@@ -19,7 +20,7 @@ pub fn try_assign_address(
 ) -> Option<(Ipv4Addr, SessionID)> {
     let mut read_buf = [1; BUF_SIZE];
     let (discovery, session_id) =
-        match accept_discovery(stream, client_socket, session_registry, &mut read_buf) {
+        match accept_discovery(stream, client_socket, session_registry, &mut read_buf).await {
             Ok(res) => res,
             Err(e) => {
                 warn!("Rejecting discovery from {client_socket} due to protocol violation: {e}");
@@ -28,7 +29,7 @@ pub fn try_assign_address(
                 return None;
             }
         };
-    match offeer_addr_protocol(discovery, session_id, addr_pool, stream) {
+    match offeer_addr_protocol(discovery, session_id, addr_pool, stream).await {
         Ok(addr) => Some((addr, session_id)),
         Err(e) => {
             warn!("Handshake with client on session {session_id:#x} failed due to protocol violation: {e}");
@@ -40,14 +41,14 @@ pub fn try_assign_address(
     }
 }
 
-fn accept_discovery(
+async fn accept_discovery(
     stream: &mut SecureStream,
     client_socket: SocketAddrV4,
     session_registry: &mut SessionRegistry,
     read_buf: &mut [u8; BUF_SIZE],
 ) -> Result<(Handshake, SessionID)> {
     // Check for discovery
-    let disc_size = stream.read(read_buf)?;
+    let disc_size = stream.read(read_buf).await?;
     let discovery = Handshake::from_bytes(&read_buf[..disc_size]);
     discovery.validate(None)?;
     let session_id = discovery.get_session_id();
@@ -57,7 +58,7 @@ fn accept_discovery(
     Ok((discovery, session_id))
 }
 
-fn offeer_addr_protocol(
+async fn offeer_addr_protocol(
     discovery: Handshake,
     session_id: SessionID,
     addr_pool: &mut AddrPool,
@@ -69,17 +70,17 @@ fn offeer_addr_protocol(
     let mut offer = discovery.advance()?;
     offer.set_offer(offered_addr);
     info!("Offering address {offered_addr} to client on session {session_id:#x}");
-    stream.write_all(&mut offer.to_bytes())?;
+    stream.write_all(&mut offer.to_bytes()).await?;
 
     // Check for request
     let expected_request = offer.advance()?;
-    let req_size = stream.read(&mut read_buf)?;
+    let req_size = stream.read(&mut read_buf).await?;
     let request = Handshake::from_bytes(&read_buf[..req_size]);
     request.validate(Some(expected_request))?;
     info!("Client on session {session_id:#x} has sent approved request for address {offered_addr}. Sending Acknowledgement...");
 
     // Send Acknowledgement
-    stream.write_all(&request.advance()?.to_bytes())?;
+    stream.write_all(&request.advance()?.to_bytes()).await?;
 
     Ok(offered_addr)
 }
