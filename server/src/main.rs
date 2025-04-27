@@ -117,35 +117,55 @@ async fn handle_client(mut stream: SecureStream) -> Result<()> {
     let mut read_buf = [0u8; MTU_SIZE];
 
     let size = stream.read(&mut read_buf).await?;
-    println!("Got packet of size {size}");
+    info!("Got from client {:?}", &read_buf[..size]);
 
-    let host_ip = Ipv4Addr::new(read_buf[12], read_buf[13], read_buf[14], read_buf[15]);
-    let conn = TcpConnection::send_init(RawTcpSock::init(host_ip), &mut read_buf[..size]).await?;
+    if read_buf[9] == 1 {
+        // ICMP
+        loop {
+            stream
+                .write(&echo::create_echo_reply(&read_buf[..size]).unwrap())
+                .await?;
+            stream.read(&mut read_buf).await?;
+        }
+    } else if read_buf[9] == 6 {
+        let host_ip = Ipv4Addr::new(read_buf[12], read_buf[13], read_buf[14], read_buf[15]);
+        let conn =
+            TcpConnection::send_init(RawTcpSock::init(host_ip), &mut read_buf[..size]).await?;
 
-    let (tls_reader, tls_writer) = split(stream);
+        let (tls_reader, tls_writer) = split(stream);
 
-    tokio::spawn(async move {
-        handle_recv(conn, tls_writer).await.unwrap();
-    });
+        let recv_handle = tokio::spawn(async move {
+            info!("starting receiver");
+            handle_recv(conn, tls_writer).await.unwrap();
+        });
 
-    tokio::spawn(async move {
-        handle_forward(conn, tls_reader).await.unwrap();
-    });
+        let forward_handle = tokio::spawn(async move {
+            info!("starting writer");
+            handle_forward(conn, tls_reader).await.unwrap();
+        });
+
+        let (_recv_res, _forward_res) = tokio::join!(recv_handle, forward_handle);
+    }
+
     Ok(())
 }
 
 async fn handle_recv(conn: TcpConnection, mut tls_writer: SecureWrite) -> Result<()> {
+    info!("receiver running!");
     loop {
         let res = conn.recv_from_remote_host().await?;
+        info!("Sending to client, {res:?}");
         tls_writer.write_all(&res).await?;
     }
 }
 
 async fn handle_forward(mut conn: TcpConnection, mut tls_reader: SecureRead) -> Result<()> {
+    info!("forwarder running!");
+    let mut buf = [0u8; MTU_SIZE];
     loop {
-        let mut buf = [0u8; MTU_SIZE];
         let size = tls_reader.read(&mut buf).await?;
 
+        info!("Forwarding");
         conn.send_to_remote_host(&mut buf[..size]).await?;
     }
 }
@@ -257,9 +277,28 @@ impl RawTcpSock {
         Ok(())
     }
 
+    unsafe fn wait_for_recv(&self) -> Result<()> {
+        let mut fds = [pollfd {
+            fd: self.sock_r,
+            events: POLLIN,
+            revents: 0,
+        }];
+
+        while fds[0].revents & POLLIN == 0 {
+            let result = poll(fds.as_mut_ptr(), 1, 500);
+            if result < 0 {
+                return Err(io::Error::last_os_error().into());
+            }
+        }
+
+        info!("Polling successful");
+        Ok(())
+    }
+
     pub fn spoof_recv(&self, peer_ip: Ipv4Addr) -> Result<Vec<u8>> {
         let mut rec_buf = [0u8; MTU_SIZE];
         unsafe {
+            self.wait_for_recv()?;
             let data_size = recvfrom(
                 self.sock_r,
                 rec_buf.as_mut_ptr() as *mut c_void,
@@ -272,7 +311,7 @@ impl RawTcpSock {
             if data_size < 0 {
                 return Err(io::Error::last_os_error().into());
             } else {
-                println!("received {:?}", &rec_buf[..data_size as usize]);
+                println!("received packet");
             }
             Ok(spoof_tcp_in(
                 &mut rec_buf[..data_size as usize],
@@ -409,21 +448,7 @@ impl RawTcpSock {
 //             }
 //
 //             let mut rec_buf = [0u8; 1500];
-//
-//             let mut fds = [pollfd {
-//                 fd: sock_r,
-//                 events: POLLIN,
-//                 revents: 0,
-//             }];
-//
-//             info!("polling");
-//             let result = poll(fds.as_mut_ptr(), 1, 500);
-//
-//             if result < 0 {
-//                 return Err(std::io::Error::last_os_error().into());
-//             }
-//
-//             if fds[0].revents & POLLIN != 0 {
+
 //             } else {
 //                 Ok(None)
 //             }
