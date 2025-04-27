@@ -61,14 +61,14 @@ impl TunInterface {
         }
     }
 }
-impl Drop for TunInterface {
-    fn drop(&mut self) {
-        info!("Closing the {} interface.", self.name);
-        unsafe {
-            close(self.fd);
-        }
-    }
-}
+// impl Drop for TunInterface {;
+//     fn drop(&mut self) {
+//         info!("Closing the {} interface.", self.name);
+//         unsafe {
+//             close(self.fd);
+//         }
+//     }
+// }
 
 pub fn setup(interface_ip: Ipv4Addr, peer_ip: Ipv4Addr) -> Result<TunInterface> {
     #[cfg(target_os = "linux")]

@@ -85,15 +85,15 @@ impl ClientSetup {
     pub fn finilize(self) -> Result<Client> {
         let (trigger, flag) = channel();
 
-        if let Err(e) = ctrlc::set_handler(move || {
-            info!("Got Keyboard interrupt. Shutting down");
-            trigger.send(());
+        // if let Err(e) = ctrlc::set_handler(move || {
+        //     info!("Got Keyboard interrupt. Shutting down");
+        //     trigger.send(());
 
-            sleep(Duration::from_millis(500));
-            info!("Graceful shutdown failed within permitted time.");
-        }) {
-            warn!("Failed to set up graceful shutdown: {e}")
-        }
+        //     sleep(Duration::from_millis(500));
+        //     info!("Graceful shutdown failed within permitted time.");
+        // }) {
+        //     warn!("Failed to set up graceful shutdown: {e}")
+        // }
 
         if let (Some(session_id), Some(interface)) = (self.session_id, self.interface) {
             Ok(Client {
@@ -119,13 +119,13 @@ impl ClientSetup {
         info!("Connecting to {server_socket}");
         let stream = connector
             .connect(
-                ServerName::from(*server_socket.ip()),
+                ServerName::try_from("VEIL").unwrap(),
                 TcpStream::connect(server_socket).await?,
             )
             .await?;
 
         let mut res = Self {
-            stream: stream,
+            stream,
             session_id: None,
             interface: None,
             read_buffer: [0; BUF_SIZE],
@@ -197,36 +197,48 @@ impl Client {
         let (reader, writer) = split(self.stream);
         let interface_clone = self.interface.clone();
 
-        tokio::spawn(async move {
-            Self::handle_read(reader, interface_clone).await.unwrap();
-        });
-
-        tokio::spawn(async move {
+        let write_handle = tokio::spawn(async move {
             Self::handle_write(writer, self.interface).await.unwrap();
         });
+        let read_handle = tokio::spawn(async move {
+            Self::handle_read(reader, interface_clone).await.unwrap();
+            info!("Finished reader");
+        });
+
+        let (_write_res, _read_res) = tokio::join!(write_handle, read_handle);
+        _read_res.unwrap();
     }
 
     async fn handle_read(mut reader: SecureRead, interface: TunInterface) -> Result<()> {
+        info!("Reader running");
         let mut res_buf = [0; MTU_SIZE];
         loop {
-            let len = reader.read(&mut res_buf[4..]).await?;
-            res_buf[3] = 2;
-            info!("Got {:?}", &res_buf[..len + 4]);
-            interface.write(&mut res_buf[..4 + len])?;
+            info!("Reading");
+            if let Ok(len) = reader.read(&mut res_buf[4..]).await {
+                info!("Found length {len}");
+                res_buf[3] = 2;
+                info!("Got {:?}", &res_buf[..len + 4]);
+                interface.write(&mut res_buf[..4 + len])?;
+            } else {
+                continue;
+            }
         }
     }
 
     async fn handle_write(mut writer: SecureWrite, interface: TunInterface) -> Result<()> {
+        info!("Writer running");
         let mut req_buf = [0; MTU_SIZE];
         loop {
             // TODO: Fix this weird "future is not `Send`" issue
             let mut size = 0;
-            if let Some(s) = interface.read(&mut req_buf)? {
-                size = s as usize;
-            }
-            if size > 0 {
-                writer.write_all(&req_buf[4..size]).await?;
-                info!("Forwarding {:?}", &req_buf[..size as usize]);
+            while size == 0 {
+                if let Some(s) = interface.read(&mut req_buf)? {
+                    size = s as usize;
+                }
+                if size > 0 {
+                    writer.write_all(&req_buf[4..size]).await?;
+                    info!("Forwarding {:?}", &req_buf[..size as usize]);
+                }
             }
         }
     }
