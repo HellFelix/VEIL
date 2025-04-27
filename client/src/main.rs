@@ -1,14 +1,17 @@
 use log::*;
+use pnet::packet::ipv4::Ipv4Packet;
 
 use std::{
     io,
     sync::mpsc::{Receiver, TryRecvError},
 };
 
-use vpn_core::{logs::init_logger, network::dhc::SessionID, Result, TunInterface, MTU_SIZE};
+use vpn_core::{
+    logs::init_logger, network::dhc::SessionID, system::TunInterface, system::MTU_SIZE, Result,
+};
 
 mod tls;
-use tls::SecureStream;
+use tls::{Client, SecureStream};
 
 #[derive(Debug, Clone, Copy)]
 #[toml_cfg::toml_config()]
@@ -19,43 +22,18 @@ pub struct ServerConfig {
     pub port: u16,
 }
 
-fn main() {
-    match init() {
+#[tokio::main]
+async fn main() {
+    match init().await {
         Ok(_) => info!("System shut down without error"),
         Err(e) => error!("System exited with {e:?}"),
     }
 }
 
-fn init() -> Result<()> {
+async fn init() -> Result<()> {
     init_logger("client", "info", false);
-    let mut client = Client::try_setup(3, SERVER_CONFIG)?;
-    if let Err(e) = client.run_traffic() {
-        // Catch and log without interruping shut down process
-        error!("{e}");
-    }
-    info!("Shutting down gracefully");
+    let client = Client::try_setup(3, SERVER_CONFIG).await?;
+    client.run().await;
+    info!("Up and running!");
     Ok(())
-}
-
-struct Client {
-    stream: SecureStream,
-    session_id: SessionID,
-    interface: TunInterface,
-    shutdown_flag: Receiver<()>,
-}
-impl Client {
-    pub fn run_traffic(&mut self) -> Result<()> {
-        let mut req_buf = [0; MTU_SIZE];
-        while let Err(TryRecvError::Empty) = self.shutdown_flag.try_recv() {
-            if let Some(size) = self.interface.read(&mut req_buf)? {
-                self.stream.write_all(&req_buf[..size as usize])?;
-
-                let mut res_buf = [0; MTU_SIZE];
-                let len = self.stream.read(&mut res_buf)?;
-                info!("Received {len} bytes");
-                self.interface.write(&mut res_buf[..len])?;
-            }
-        }
-        Ok(())
-    }
 }
