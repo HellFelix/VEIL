@@ -4,3 +4,4 @@ logs/
 */Cargo.lock
 certs/
 .DS_Store
+.tokeignore
