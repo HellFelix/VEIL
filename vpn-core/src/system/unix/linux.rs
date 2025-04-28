@@ -11,7 +11,7 @@ const TUNSETIFF: libc::c_ulong = 0x400454ca; // from <linux/if_tun.h>
 
 use crate::system::TunInterface;
 
-pub const MTU_SIZE: usize = 1500;
+pub const MTU_SIZE: usize = 9000;
 
 #[repr(C)]
 #[derive(Debug)]

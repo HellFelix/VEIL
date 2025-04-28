@@ -15,7 +15,7 @@ use libc::{
 use crate::system::TunInterface;
 use crate::utils::error::Result;
 
-pub const MTU_SIZE: usize = 1504;
+pub const MTU_SIZE: usize = 9000;
 
 pub unsafe fn open_raw_interface(
     local_addr: Ipv4Addr,
