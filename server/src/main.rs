@@ -211,8 +211,7 @@ struct RawTcpSock {
 }
 impl RawTcpSock {
     pub fn init(host_ip: Ipv4Addr) -> Self {
-        // TODO: This should be generated upon connection startup
-        let spoofed_eph_port = 53555;
+        let spoofed_eph_port = rand::rng().random_range(45000..54000);
 
         unsafe {
             let sock_r = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
@@ -298,7 +297,7 @@ impl RawTcpSock {
     pub fn spoof_recv(&self, peer_ip: Ipv4Addr) -> Result<Vec<u8>> {
         let mut rec_buf = [0u8; MTU_SIZE];
         unsafe {
-            self.wait_for_recv()?;
+            //self.wait_for_recv()?;
             let data_size = recvfrom(
                 self.sock_r,
                 rec_buf.as_mut_ptr() as *mut c_void,
