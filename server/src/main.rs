@@ -23,18 +23,16 @@ use tokio::{
     sync::Mutex,
 };
 
-use tokio_rustls::server::TlsStream;
-
 mod echo;
 mod encryption;
 mod forwarding;
-use forwarding::{Connection, TcpConnection};
+use forwarding::{Connection, IcmpConnection, TcpConnection};
 mod handshake;
 
 use echo::create_echo_reply;
+
+use tokio_rustls::server::TlsStream;
 type SecureStream = TlsStream<TcpStream>;
-type SecureRead = ReadHalf<SecureStream>;
-type SecureWrite = WriteHalf<SecureStream>;
 
 #[tokio::main]
 async fn main() {
@@ -106,12 +104,7 @@ async fn handle_client(mut stream: SecureStream) -> Result<()> {
 
     if read_buf[9] == 1 {
         // ICMP
-        loop {
-            stream
-                .write(&echo::create_echo_reply(&read_buf[..size]).unwrap())
-                .await?;
-            stream.read(&mut read_buf).await?;
-        }
+        IcmpConnection::init_from(&mut read_buf[..size], stream).await?;
     } else if read_buf[9] == 6 {
         TcpConnection::init_from(&mut read_buf[..size], stream).await?;
     }
