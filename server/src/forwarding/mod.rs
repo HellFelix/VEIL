@@ -14,7 +14,7 @@ use pnet::packet::{
 use rand::Rng;
 use tokio::io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 
-use crate::{SecureStream, SUBNET_ADDR};
+use crate::SecureStream;
 use vpn_core::{system::MTU_SIZE, Result};
 
 mod tcp;

@@ -11,7 +11,7 @@ use tokio::io::split;
 
 use vpn_core::Result;
 
-use crate::{SecureStream, SUBNET_ADDR};
+use crate::{SecureStream, SERVER_CONFIG};
 
 use super::{AbstractSock, Connection, RawSock};
 
@@ -87,7 +87,7 @@ impl Connection for UdpConnection {
 
         let mut conn = Self {
             sock,
-            self_addr: SUBNET_ADDR,
+            self_addr: SERVER_CONFIG.get_ipv4_addr(),
             peer_addr: ip_packet.get_source(),
         };
 

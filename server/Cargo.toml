@@ -14,4 +14,5 @@ rustls-pemfile = "2.2.0"
 sha2 = "0.10.8"
 tokio = { version = "1.44.2", features = ["full"] }
 tokio-rustls = "0.26.2"
+toml-cfg = "0.2.0"
 vpn-core = { path = "../vpn-core"}

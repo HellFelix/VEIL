@@ -34,6 +34,20 @@ use echo::create_echo_reply;
 use tokio_rustls::server::TlsStream;
 type SecureStream = TlsStream<TcpStream>;
 
+#[derive(Debug, Clone, Copy)]
+#[toml_cfg::toml_config()]
+pub struct ServerConfig {
+    #[default(0)]
+    pub address: u32,
+    #[default(0)]
+    pub port: u16,
+}
+impl ServerConfig {
+    pub fn get_ipv4_addr(&self) -> Ipv4Addr {
+        Ipv4Addr::from_bits(self.address)
+    }
+}
+
 #[tokio::main]
 async fn main() {
     match init().await {
@@ -51,7 +65,7 @@ async fn init() -> Result<()> {
 async fn run_server() -> Result<()> {
     let acceptor = TlsAcceptor::from(Arc::new(get_tls_config()?));
 
-    let server_socket = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 8345);
+    let server_socket = SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), SERVER_CONFIG.port);
     let listener = TcpListener::bind(SocketAddr::V4(server_socket)).await?;
     let addr_pool = Arc::new(Mutex::new(dhc::AddrPool::create()));
     addr_pool.lock().await.claim(SERVER_ADDR)?;
@@ -93,8 +107,6 @@ async fn run_server() -> Result<()> {
         }
     }
 }
-
-const SUBNET_ADDR: Ipv4Addr = Ipv4Addr::new(192, 168, 1, 69);
 
 async fn handle_client(mut stream: SecureStream) -> Result<()> {
     let mut read_buf = [0u8; MTU_SIZE];

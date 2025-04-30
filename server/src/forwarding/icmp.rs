@@ -15,7 +15,7 @@ use tokio::{
 use vpn_core::{network::SERVER_ADDR, system::MTU_SIZE};
 
 use super::{AbstractSock, Connection, RawSock};
-use crate::{echo, SUBNET_ADDR};
+use crate::echo;
 
 #[derive(Clone, Copy)]
 pub struct RawIcmpSock {
