@@ -26,7 +26,7 @@ use tokio::{
 mod echo;
 mod encryption;
 mod forwarding;
-use forwarding::{Connection, IcmpConnection, TcpConnection};
+use forwarding::{Connection, IcmpConnection, TcpConnection, UdpConnection};
 mod handshake;
 
 use echo::create_echo_reply;
@@ -102,11 +102,16 @@ async fn handle_client(mut stream: SecureStream) -> Result<()> {
     let size = stream.read(&mut read_buf).await?;
     info!("Got from client {:?}", &read_buf[..size]);
 
-    if read_buf[9] == 1 {
-        // ICMP
-        IcmpConnection::init_from(&mut read_buf[..size], stream).await?;
-    } else if read_buf[9] == 6 {
-        TcpConnection::init_from(&mut read_buf[..size], stream).await?;
+    match read_buf[9] {
+        1 => IcmpConnection::init_from(&mut read_buf[..size], stream).await?,
+        6 => TcpConnection::init_from(&mut read_buf[..size], stream).await?,
+        17 => UdpConnection::init_from(&mut read_buf[..size], stream).await?,
+        _ => {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("Unknown next protocol"),
+            ))
+        }
     }
 
     Ok(())

@@ -23,6 +23,9 @@ pub use tcp::TcpConnection;
 mod icmp;
 pub use icmp::IcmpConnection;
 
+mod udp;
+pub use udp::UdpConnection;
+
 type SecureRead = ReadHalf<SecureStream>;
 type SecureWrite = WriteHalf<SecureStream>;
 
