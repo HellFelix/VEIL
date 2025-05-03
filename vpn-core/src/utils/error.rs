@@ -23,17 +23,16 @@ pub enum ErrorKind {
 #[derive(Debug)]
 pub struct Error {
     kind: ErrorKind,
-    inner: Box<dyn ErrType>,
+    inner: Box<dyn ErrType + Send + Sync>,
 }
 impl Error {
-    pub fn new(kind: ErrorKind, inner: impl Into<Box<dyn ErrType>>) -> Self {
+    pub fn new(kind: ErrorKind, inner: impl Into<Box<dyn ErrType + Send + Sync>>) -> Self {
         Self {
             kind,
             inner: inner.into(),
         }
     }
 }
-
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(

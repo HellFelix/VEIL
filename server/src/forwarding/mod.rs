@@ -14,7 +14,7 @@ use pnet::packet::{
 use rand::Rng;
 use tokio::io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 
-use crate::SecureStream;
+use crate::{SecureStream, SERVER_CONFIG};
 use vpn_core::{system::MTU_SIZE, Result};
 
 mod tcp;
@@ -37,13 +37,6 @@ pub struct AbstractSock {
     spoofed_eph_port: u16,
 }
 impl AbstractSock {
-    pub fn set_eph_if_not(&mut self, eph_port: u16) {
-        match self.eph_port {
-            Some(_) => {}
-            None => self.eph_port = Some(eph_port),
-        }
-    }
-
     pub fn send(&self, spoofed_packet: Vec<u8>) -> Result<()> {
         unsafe {
             let res = sendto(
@@ -68,7 +61,7 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
     fn get_abstract(&self) -> AbstractSock;
 
     //TODO: Do error handling from kernel results
-    fn init(host_addr: Ipv4Addr) -> Self {
+    fn init(host_addr: Ipv4Addr, eph_port: Option<u16>) -> Self {
         //TODO: Set the range from the systems available ports
         let spoofed_eph_port = rand::rng().random_range(45000..54000);
 
@@ -96,7 +89,7 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
             Self::from(AbstractSock {
                 dst,
                 sock_r,
-                eph_port: None,
+                eph_port,
                 spoofed_eph_port,
             })
         }
@@ -179,32 +172,60 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
     ) -> Option<()>;
 }
 
-pub trait Connection: Send {
+pub trait Connection: Send + Copy {
     type SockType: RawSock;
 
-    async fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()>;
-    async fn recv_from_remote_host(&self) -> Result<Vec<u8>>;
+    // send & recv functions are technically async functions, but because their
+    // return values must be `Send`, their signatures are written as returning
+    // futures instead of "async fn"
+    // For all intents and purposes, they can be treated as async functions
+    fn send_to_remote_host(
+        &mut self,
+        packet: &mut [u8],
+    ) -> impl std::future::Future<Output = Result<()>> + Send;
+    fn recv_from_remote_host(
+        &self,
+        buf: &mut [u8],
+    ) -> impl std::future::Future<Output = Result<usize>> + Send;
 
-    async fn handle_recv(&self, mut tls_writer: SecureWrite) -> Result<()> {
-        info!("receiver running!");
-        loop {
-            let res = self.recv_from_remote_host().await?;
-            info!("Sending to client, {res:?}");
-            tls_writer.write_all(&res).await?;
+    // async fn handle_recv(&self, mut tls_writer: SecureWrite) -> Result<()> {
+    //     info!("receiver running!");
+    //     loop {
+    //         let res = self.recv_from_remote_host().await?;
+    //         info!("Sending to client, {res:?}");
+    //         tls_writer.write_all(&res).await?;
+    //     }
+    // }
+
+    // async fn handle_forward(&mut self, mut tls_reader: SecureRead) -> Result<()> {
+    //     info!("forwarder running!");
+    //     let mut buf = [0u8; MTU_SIZE];
+    //     loop {
+    //         let size = tls_reader.read(&mut buf).await?;
+    //
+    //         info!("Forwarding");
+    //         self.send_to_remote_host(&mut buf[..size]).await?;
+    //     }
+    // }
+    //
+    fn get_eph_port(packet: &Ipv4Packet) -> Option<u16>;
+
+    fn create_abstract(packet: &Ipv4Packet) -> AbstractConn<Self::SockType> {
+        let sock = Self::SockType::init(packet.get_destination(), Self::get_eph_port(packet));
+
+        AbstractConn {
+            sock,
+            self_addr: SERVER_CONFIG.get_ipv4_addr(),
+            peer_addr: packet.get_source(),
         }
     }
+}
 
-    async fn handle_forward(&mut self, mut tls_reader: SecureRead) -> Result<()> {
-        info!("forwarder running!");
-        let mut buf = [0u8; MTU_SIZE];
-        loop {
-            let size = tls_reader.read(&mut buf).await?;
-
-            info!("Forwarding");
-            self.send_to_remote_host(&mut buf[..size]).await?;
-        }
-    }
-
-    async fn init_from(packet: &mut [u8], stream: SecureStream) -> Result<()>;
-    async fn run_forwarding(self, stream: SecureStream) -> Result<()>;
+pub struct AbstractConn<S>
+where
+    S: RawSock,
+{
+    sock: S,
+    self_addr: Ipv4Addr,
+    peer_addr: Ipv4Addr,
 }

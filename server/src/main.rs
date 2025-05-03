@@ -1,9 +1,16 @@
+use pnet::packet::{
+    ip::{IpNextHeaderProtocol, IpNextHeaderProtocols},
+    ipv4::Ipv4Packet,
+    tcp::TcpPacket,
+    Packet,
+};
 use tokio_rustls::TlsAcceptor;
 
 use encryption::get_tls_config;
 use handshake::SessionRegistry;
 use log::*;
 use std::{
+    collections::HashMap,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
 };
@@ -18,15 +25,18 @@ use vpn_core::{
 };
 
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
+    io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
     net::{TcpListener, TcpStream},
-    sync::Mutex,
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Mutex, RwLock,
+    },
 };
 
 mod echo;
 mod encryption;
 mod forwarding;
-use forwarding::{Connection, IcmpConnection, TcpConnection, UdpConnection};
+use forwarding::{Connection, IcmpConnection, RawSock, TcpConnection, UdpConnection};
 mod handshake;
 
 use echo::create_echo_reply;
@@ -109,22 +119,118 @@ async fn run_server() -> Result<()> {
 }
 
 async fn handle_client(mut stream: SecureStream) -> Result<()> {
-    let mut read_buf = [0u8; MTU_SIZE];
+    let mut channels: HashMap<ConnIdent, Sender<Vec<u8>>> = HashMap::new();
 
-    let size = stream.read(&mut read_buf).await?;
-    info!("Got from client {:?}", &read_buf[..size]);
+    let (mut tls_reader, mut tls_writer) = split(stream);
+    let (in_sender, mut in_receiver) = channel(100);
 
-    match read_buf[9] {
-        1 => IcmpConnection::init_from(&mut read_buf[..size], stream).await?,
-        6 => TcpConnection::init_from(&mut read_buf[..size], stream).await?,
-        17 => UdpConnection::init_from(&mut read_buf[..size], stream).await?,
-        _ => {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Unknown next protocol"),
-            ))
+    tokio::spawn(async move {
+        let mut buf = [0u8; MTU_SIZE];
+        loop {
+            let size = tls_reader.read(&mut buf).await.unwrap();
+            let (conn_ident, protocol) = get_ident(&buf[..size]).unwrap();
+
+            if let Some(ch) = channels.get(&conn_ident) {
+                ch.send(buf[..size].to_owned()).await.unwrap();
+            } else {
+                let (out_sender, out_receiver) = channel(10);
+                channels.insert(conn_ident, out_sender);
+                match protocol {
+                    SupportedProtocol::Tcp => {
+                        init_out_link::<TcpConnection>(out_receiver, in_sender.clone())
+                    }
+                }
+            }
         }
-    }
+    });
 
+    tokio::spawn(async move {
+        loop {
+            while let Some(response) = in_receiver.recv().await {
+                tls_writer.write_all(&response).await.unwrap();
+            }
+        }
+    });
+    // let (out_sender, out_receiver) = channel::<&[u8]>(10);
+    // let (in_sender, in_receiver) = channel::<&[u8]>(10);
+
+    // let size = stream.read(&mut read_buf).await?;
+    // info!("Got from client {:?}", &read_buf[..size]);
+    //
+    // match read_buf[9] {
+    //     1 => IcmpConnection::init_from(&mut read_buf[..size], stream).await?,
+    //     6 => TcpConnection::init_from(&mut read_buf[..size], stream).await?,
+    //     17 => UdpConnection::init_from(&mut read_buf[..size], stream).await?,
+    //     _ => {
+    //         return Err(Error::new(
+    //             ErrorKind::InvalidInput,
+    //             format!("Unknown next protocol"),
+    //         ))
+    //     }
+    // }
+    //
     Ok(())
+}
+
+fn init_out_link<C: Connection + 'static>(
+    mut out_receiver: Receiver<Vec<u8>>,
+    in_sender: Sender<Vec<u8>>,
+) {
+    let mut conn = create_conn::<C>();
+
+    tokio::spawn(async move {
+        while let Some(mut packet) = out_receiver.recv().await {
+            conn.send_to_remote_host(&mut packet).await.unwrap();
+        }
+    });
+
+    tokio::spawn(async move {
+        let mut buf = [0u8; MTU_SIZE];
+        loop {
+            let size = conn.recv_from_remote_host(&mut buf).await.unwrap();
+            in_sender.send(buf[..size].to_owned()).await.unwrap();
+        }
+    });
+}
+
+fn get_ident(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol)> {
+    let packet = Ipv4Packet::new(buf)?;
+    let mut res = ConnIdent {
+        dst_addr: packet.get_destination(),
+        proto: packet.get_next_level_protocol(),
+        eph_port: None,
+        dst_port: None,
+    };
+    let protocol = match packet.get_next_level_protocol() {
+        IpNextHeaderProtocols::Tcp => {
+            get_ident_tcp(TcpPacket::new(packet.payload())?, &mut res);
+            SupportedProtocol::Tcp
+        }
+        _ => {
+            return None;
+        }
+    };
+
+    return Some((res, protocol));
+}
+
+fn create_conn<C: Connection>() -> C {
+    unimplemented!()
+}
+
+fn get_ident_tcp(packet: TcpPacket, conn_ident: &mut ConnIdent) {
+    conn_ident.eph_port = Some(packet.get_source());
+    conn_ident.dst_port = Some(packet.get_destination());
+}
+
+#[derive(PartialEq, Eq, Hash)]
+struct ConnIdent {
+    dst_addr: Ipv4Addr,
+    eph_port: Option<u16>,
+    dst_port: Option<u16>,
+    proto: IpNextHeaderProtocol,
+}
+
+enum SupportedProtocol {
+    Tcp,
 }

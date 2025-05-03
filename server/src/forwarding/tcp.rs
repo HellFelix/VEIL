@@ -80,21 +80,21 @@ impl Connection for TcpConnection {
         self.sock.spoof_recv(self.peer_addr)
     }
 
-    async fn init_from(packet: &mut [u8], stream: SecureStream) -> Result<()> {
-        let ip_packet = Ipv4Packet::new(packet).unwrap();
-
-        let sock = RawTcpSock::init(ip_packet.get_destination());
-
-        let mut conn = Self {
-            sock,
-            self_addr: SERVER_CONFIG.get_ipv4_addr(),
-            peer_addr: ip_packet.get_source(),
-        };
-
-        conn.send_to_remote_host(packet).await?;
-
-        conn.run_forwarding(stream).await
-    }
+    // async fn init_from(packet: &mut [u8], stream: SecureStream) -> Result<()> {
+    //     let ip_packet = Ipv4Packet::new(packet).unwrap();
+    //
+    //     let sock = RawTcpSock::init(ip_packet.get_destination());
+    //
+    //     let mut conn = Self {
+    //         sock,
+    //         self_addr: SERVER_CONFIG.get_ipv4_addr(),
+    //         peer_addr: ip_packet.get_source(),
+    //     };
+    //
+    //     conn.send_to_remote_host(packet).await?;
+    //
+    //     conn.run_forwarding(stream).await
+    // }
 
     async fn run_forwarding(mut self, stream: SecureStream) -> Result<()> {
         let (tls_reader, tls_writer) = split(stream);
