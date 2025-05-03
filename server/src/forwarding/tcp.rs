@@ -11,8 +11,7 @@ use pnet::packet::{
 };
 use tokio::io::split;
 
-use super::{AbstractSock, Connection, RawSock};
-use crate::{SecureStream, SERVER_CONFIG};
+use super::{AbstractConn, AbstractSock, Connection, RawSock};
 use vpn_core::Result;
 
 #[derive(Clone, Copy)]
@@ -32,15 +31,12 @@ impl RawSock for RawTcpSock {
     }
 
     fn spoof_ip_next_out(
-        &mut self,
+        &self,
         packet: &mut [u8],
         src_addr: Ipv4Addr,
         dst_addr: Ipv4Addr,
     ) -> Option<()> {
         let mut tcp_packet = MutableTcpPacket::new(packet)?;
-        let eph_port = tcp_packet.get_source();
-
-        self.abs.set_eph_if_not(eph_port);
 
         tcp_packet.set_source(self.get_abstract().spoofed_eph_port);
         let tcp_checksum =
@@ -70,13 +66,21 @@ pub struct TcpConnection {
     peer_addr: Ipv4Addr,
 }
 
-impl Connection for TcpConnection {
-    type SockType = RawTcpSock;
+impl From<AbstractConn<RawTcpSock>> for TcpConnection {
+    fn from(value: AbstractConn<RawTcpSock>) -> Self {
+        TcpConnection {
+            sock: value.sock,
+            self_addr: value.self_addr,
+            peer_addr: value.peer_addr,
+        }
+    }
+}
 
-    async fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()> {
+impl Connection<RawTcpSock> for TcpConnection {
+    fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()> {
         self.sock.spoof_send(packet, self.self_addr)
     }
-    async fn recv_from_remote_host(&self) -> Result<Vec<u8>> {
+    fn recv_from_remote_host(&self) -> Result<Vec<u8>> {
         self.sock.spoof_recv(self.peer_addr)
     }
 
@@ -96,21 +100,9 @@ impl Connection for TcpConnection {
     //     conn.run_forwarding(stream).await
     // }
 
-    async fn run_forwarding(mut self, stream: SecureStream) -> Result<()> {
-        let (tls_reader, tls_writer) = split(stream);
+    fn get_eph_port(packet: &Ipv4Packet) -> Option<u16> {
+        let tcp_packet = TcpPacket::new(packet.payload())?;
 
-        let recv_handle = tokio::spawn(async move {
-            info!("starting receiver");
-            self.handle_recv(tls_writer).await.unwrap();
-        });
-
-        let forward_handle = tokio::spawn(async move {
-            info!("starting writer");
-            self.handle_forward(tls_reader).await.unwrap();
-        });
-
-        let (_recv_res, _forward_res) = tokio::join!(recv_handle, forward_handle);
-
-        Ok(())
+        Some(tcp_packet.get_source())
     }
 }

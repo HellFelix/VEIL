@@ -18,13 +18,13 @@ use crate::{SecureStream, SERVER_CONFIG};
 use vpn_core::{system::MTU_SIZE, Result};
 
 mod tcp;
-pub use tcp::TcpConnection;
+pub use tcp::{RawTcpSock, TcpConnection};
 
-mod icmp;
-pub use icmp::IcmpConnection;
-
-mod udp;
-pub use udp::UdpConnection;
+// mod icmp;
+// pub use icmp::IcmpConnection;
+//
+// mod udp;
+// pub use udp::UdpConnection;
 
 type SecureRead = ReadHalf<SecureStream>;
 type SecureWrite = WriteHalf<SecureStream>;
@@ -165,28 +165,20 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
     ) -> Option<()>;
 
     fn spoof_ip_next_out(
-        &mut self,
+        &self,
         packet: &mut [u8],
         src_addr: Ipv4Addr,
         dst_addr: Ipv4Addr,
     ) -> Option<()>;
 }
 
-pub trait Connection: Send + Copy {
-    type SockType: RawSock;
-
+pub trait Connection<S: RawSock>: Send + Sync + Copy + From<AbstractConn<S>> {
     // send & recv functions are technically async functions, but because their
     // return values must be `Send`, their signatures are written as returning
     // futures instead of "async fn"
     // For all intents and purposes, they can be treated as async functions
-    fn send_to_remote_host(
-        &mut self,
-        packet: &mut [u8],
-    ) -> impl std::future::Future<Output = Result<()>> + Send;
-    fn recv_from_remote_host(
-        &self,
-        buf: &mut [u8],
-    ) -> impl std::future::Future<Output = Result<usize>> + Send;
+    fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()>;
+    fn recv_from_remote_host(&self) -> Result<Vec<u8>>;
 
     // async fn handle_recv(&self, mut tls_writer: SecureWrite) -> Result<()> {
     //     info!("receiver running!");
@@ -210,14 +202,15 @@ pub trait Connection: Send + Copy {
     //
     fn get_eph_port(packet: &Ipv4Packet) -> Option<u16>;
 
-    fn create_abstract(packet: &Ipv4Packet) -> AbstractConn<Self::SockType> {
-        let sock = Self::SockType::init(packet.get_destination(), Self::get_eph_port(packet));
+    fn create_from_packet(packet: &Ipv4Packet) -> Self {
+        let sock = S::init(packet.get_destination(), Self::get_eph_port(packet));
 
         AbstractConn {
             sock,
             self_addr: SERVER_CONFIG.get_ipv4_addr(),
             peer_addr: packet.get_source(),
         }
+        .into()
     }
 }
 

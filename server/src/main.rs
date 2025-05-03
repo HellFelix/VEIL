@@ -36,7 +36,7 @@ use tokio::{
 mod echo;
 mod encryption;
 mod forwarding;
-use forwarding::{Connection, IcmpConnection, RawSock, TcpConnection, UdpConnection};
+use forwarding::{Connection, RawSock, RawTcpSock, TcpConnection};
 mod handshake;
 
 use echo::create_echo_reply;
@@ -118,26 +118,33 @@ async fn run_server() -> Result<()> {
     }
 }
 
-async fn handle_client(mut stream: SecureStream) -> Result<()> {
+async fn handle_client(stream: SecureStream) -> Result<()> {
     let mut channels: HashMap<ConnIdent, Sender<Vec<u8>>> = HashMap::new();
 
     let (mut tls_reader, mut tls_writer) = split(stream);
     let (in_sender, mut in_receiver) = channel(100);
 
     tokio::spawn(async move {
+        info!("Forwarder running");
         let mut buf = [0u8; MTU_SIZE];
         loop {
             let size = tls_reader.read(&mut buf).await.unwrap();
-            let (conn_ident, protocol) = get_ident(&buf[..size]).unwrap();
+            let (conn_ident, protocol, packet) = process_packet(&buf[..size]).unwrap();
 
             if let Some(ch) = channels.get(&conn_ident) {
+                info!("Found existing connection");
                 ch.send(buf[..size].to_owned()).await.unwrap();
             } else {
+                info!("Found new connection");
                 let (out_sender, out_receiver) = channel(10);
-                channels.insert(conn_ident, out_sender);
+                channels.insert(conn_ident, out_sender.clone());
+                out_sender.send(buf[..size].to_owned()).await.unwrap();
+
+                let link_send = in_sender.clone();
                 match protocol {
                     SupportedProtocol::Tcp => {
-                        init_out_link::<TcpConnection>(out_receiver, in_sender.clone())
+                        init_links::<RawTcpSock, TcpConnection>(out_receiver, link_send, &packet)
+                            .await
                     }
                 }
             }
@@ -145,11 +152,12 @@ async fn handle_client(mut stream: SecureStream) -> Result<()> {
     });
 
     tokio::spawn(async move {
-        loop {
-            while let Some(response) = in_receiver.recv().await {
-                tls_writer.write_all(&response).await.unwrap();
-            }
+        info!("Responder running");
+        while let Some(response) = in_receiver.recv().await {
+            info!("Responder got response {response:?}");
+            tls_writer.write_all(&response).await.unwrap();
         }
+        info!("Responder done");
     });
     // let (out_sender, out_receiver) = channel::<&[u8]>(10);
     // let (in_sender, in_receiver) = channel::<&[u8]>(10);
@@ -172,28 +180,44 @@ async fn handle_client(mut stream: SecureStream) -> Result<()> {
     Ok(())
 }
 
-fn init_out_link<C: Connection + 'static>(
+async fn init_links<S, C>(
     mut out_receiver: Receiver<Vec<u8>>,
     in_sender: Sender<Vec<u8>>,
-) {
-    let mut conn = create_conn::<C>();
+    packet: &Ipv4Packet<'_>,
+) where
+    S: RawSock,
+    C: Connection<S> + 'static,
+{
+    let mut conn = create_conn::<S, C>(packet);
 
-    tokio::spawn(async move {
+    let out_fut = tokio::spawn(async move {
+        info!("Out-link running");
         while let Some(mut packet) = out_receiver.recv().await {
-            conn.send_to_remote_host(&mut packet).await.unwrap();
+            info!("Forwarding...");
+            conn.send_to_remote_host(&mut packet).unwrap();
         }
     });
 
-    tokio::spawn(async move {
-        let mut buf = [0u8; MTU_SIZE];
+    let in_fut = tokio::spawn(async move {
+        // let res = tokio::task::spawn_blocking(|| )
+        //     .await
+        //     .unwrap();
+        // TODO: Make receiving non-blocking.
         loop {
-            let size = conn.recv_from_remote_host(&mut buf).await.unwrap();
-            in_sender.send(buf[..size].to_owned()).await.unwrap();
+            let res = tokio::task::spawn_blocking(move || conn.recv_from_remote_host().unwrap())
+                .await
+                .unwrap(); // This shouldn't block the task
+            info!("In-link sending");
+            in_sender.send(res).await.unwrap();
         }
     });
+
+    // let (out_res, in_res) = tokio::join!(out_fut, in_fut);
+    // out_res.unwrap();
+    // in_res.unwrap();
 }
 
-fn get_ident(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol)> {
+fn process_packet(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol, Ipv4Packet)> {
     let packet = Ipv4Packet::new(buf)?;
     let mut res = ConnIdent {
         dst_addr: packet.get_destination(),
@@ -211,11 +235,15 @@ fn get_ident(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol)> {
         }
     };
 
-    return Some((res, protocol));
+    return Some((res, protocol, packet));
 }
 
-fn create_conn<C: Connection>() -> C {
-    unimplemented!()
+fn create_conn<S, C>(packet: &Ipv4Packet) -> C
+where
+    S: RawSock,
+    C: Connection<S>,
+{
+    C::create_from_packet(packet)
 }
 
 fn get_ident_tcp(packet: TcpPacket, conn_ident: &mut ConnIdent) {
