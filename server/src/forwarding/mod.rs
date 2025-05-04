@@ -15,7 +15,7 @@ use rand::Rng;
 use tokio::io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 
 use crate::{SecureStream, SERVER_CONFIG};
-use vpn_core::{system::MTU_SIZE, Result};
+use vpn_core::{system::MTU_SIZE, Error, Result};
 
 mod tcp;
 pub use tcp::{RawTcpSock, TcpConnection};
@@ -103,6 +103,14 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
 
     fn spoof_out(&mut self, buf: &mut [u8], src_ip: Ipv4Addr) -> Option<(Vec<u8>, Ipv4Addr)> {
         let mut packet = MutableIpv4Packet::new(buf)?;
+
+        // debugging purposes
+        if packet.get_source() == Ipv4Addr::new(192, 168, 1, 64)
+            && packet.get_destination() == Ipv4Addr::new(172, 16, 0, 2)
+        {
+            info!("Found troubling packet");
+        }
+        //
         let peer_addr = packet.get_source();
 
         let mut payload = packet.payload().to_owned().clone();
@@ -137,14 +145,26 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
             } else {
                 println!("received packet");
             }
-            Ok(self
-                .spoof_in(&mut rec_buf[..data_size as usize], peer_ip)
-                .unwrap())
+            if let Some(res) = self.spoof_in(&mut rec_buf[..data_size as usize], peer_ip) {
+                Ok(res)
+            } else {
+                Err(Error::new(
+                    vpn_core::ErrorKind::Dropped,
+                    format!("Packet dropped due to traffic rule"),
+                ))
+            }
         }
     }
 
     fn spoof_in(&self, buf: &mut [u8], peer_ip: Ipv4Addr) -> Option<Vec<u8>> {
         let mut packet = MutableIpv4Packet::new(buf)?;
+
+        // debugging purposes
+        if packet.get_source() == Ipv4Addr::new(192, 168, 1, 64) {
+            info!("Packet is destined for {}", packet.get_destination());
+            return None;
+        }
+        //
 
         let mut payload = packet.payload().to_owned().clone();
         self.spoof_ip_next_in(&mut payload, packet.get_source(), peer_ip);
@@ -173,33 +193,9 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
 }
 
 pub trait Connection<S: RawSock>: Send + Sync + Copy + From<AbstractConn<S>> {
-    // send & recv functions are technically async functions, but because their
-    // return values must be `Send`, their signatures are written as returning
-    // futures instead of "async fn"
-    // For all intents and purposes, they can be treated as async functions
     fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()>;
     fn recv_from_remote_host(&self) -> Result<Vec<u8>>;
 
-    // async fn handle_recv(&self, mut tls_writer: SecureWrite) -> Result<()> {
-    //     info!("receiver running!");
-    //     loop {
-    //         let res = self.recv_from_remote_host().await?;
-    //         info!("Sending to client, {res:?}");
-    //         tls_writer.write_all(&res).await?;
-    //     }
-    // }
-
-    // async fn handle_forward(&mut self, mut tls_reader: SecureRead) -> Result<()> {
-    //     info!("forwarder running!");
-    //     let mut buf = [0u8; MTU_SIZE];
-    //     loop {
-    //         let size = tls_reader.read(&mut buf).await?;
-    //
-    //         info!("Forwarding");
-    //         self.send_to_remote_host(&mut buf[..size]).await?;
-    //     }
-    // }
-    //
     fn get_eph_port(packet: &Ipv4Packet) -> Option<u16>;
 
     fn create_from_packet(packet: &Ipv4Packet) -> Self {

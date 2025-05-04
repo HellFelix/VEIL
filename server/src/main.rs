@@ -159,24 +159,6 @@ async fn handle_client(stream: SecureStream) -> Result<()> {
         }
         info!("Responder done");
     });
-    // let (out_sender, out_receiver) = channel::<&[u8]>(10);
-    // let (in_sender, in_receiver) = channel::<&[u8]>(10);
-
-    // let size = stream.read(&mut read_buf).await?;
-    // info!("Got from client {:?}", &read_buf[..size]);
-    //
-    // match read_buf[9] {
-    //     1 => IcmpConnection::init_from(&mut read_buf[..size], stream).await?,
-    //     6 => TcpConnection::init_from(&mut read_buf[..size], stream).await?,
-    //     17 => UdpConnection::init_from(&mut read_buf[..size], stream).await?,
-    //     _ => {
-    //         return Err(Error::new(
-    //             ErrorKind::InvalidInput,
-    //             format!("Unknown next protocol"),
-    //         ))
-    //     }
-    // }
-    //
     Ok(())
 }
 
@@ -190,7 +172,7 @@ async fn init_links<S, C>(
 {
     let mut conn = create_conn::<S, C>(packet);
 
-    let out_fut = tokio::spawn(async move {
+    tokio::spawn(async move {
         info!("Out-link running");
         while let Some(mut packet) = out_receiver.recv().await {
             info!("Forwarding...");
@@ -198,23 +180,22 @@ async fn init_links<S, C>(
         }
     });
 
-    let in_fut = tokio::spawn(async move {
-        // let res = tokio::task::spawn_blocking(|| )
-        //     .await
-        //     .unwrap();
-        // TODO: Make receiving non-blocking.
+    tokio::spawn(async move {
         loop {
-            let res = tokio::task::spawn_blocking(move || conn.recv_from_remote_host().unwrap())
+            match tokio::task::spawn_blocking(move || conn.recv_from_remote_host())
                 .await
-                .unwrap(); // This shouldn't block the task
-            info!("In-link sending");
-            in_sender.send(res).await.unwrap();
+                .unwrap()
+            {
+                Ok(res) => {
+                    info!("In-link sending");
+                    in_sender.send(res).await.unwrap();
+                }
+                Err(e) => {
+                    error!("{e}");
+                }
+            }
         }
     });
-
-    // let (out_res, in_res) = tokio::join!(out_fut, in_fut);
-    // out_res.unwrap();
-    // in_res.unwrap();
 }
 
 fn process_packet(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol, Ipv4Packet)> {

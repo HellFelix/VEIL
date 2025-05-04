@@ -7,6 +7,8 @@ pub enum ErrorKind {
     InvalidData,
     InvalidInput,
 
+    Dropped,
+
     // Handshake
     AddressClaimed,
     Rejection,
