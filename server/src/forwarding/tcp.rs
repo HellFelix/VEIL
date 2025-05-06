@@ -59,34 +59,45 @@ impl RawSock for RawTcpSock {
         Some(())
     }
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TcpState {
+    Run,
+    Fin,
+}
+
 #[derive(Clone, Copy)]
 pub struct TcpConnection {
-    sock: RawTcpSock,
-    self_addr: Ipv4Addr,
-    peer_addr: Ipv4Addr,
+    abs: AbstractConn<RawTcpSock>,
+    state: TcpState,
 }
 
 impl From<AbstractConn<RawTcpSock>> for TcpConnection {
     fn from(value: AbstractConn<RawTcpSock>) -> Self {
         TcpConnection {
-            sock: value.sock,
-            self_addr: value.self_addr,
-            peer_addr: value.peer_addr,
+            abs: value,
+            state: TcpState::Run,
         }
     }
 }
 
-impl Connection<RawTcpSock> for TcpConnection {
+impl Connection<RawTcpSock, TcpPacket<'_>> for TcpConnection {
     fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()> {
-        self.sock.spoof_send(packet, self.self_addr)
+        self.abs.sock.spoof_send(packet, self.abs.self_addr)
     }
     fn recv_from_remote_host(&self) -> Result<Vec<u8>> {
-        self.sock.spoof_recv(self.peer_addr)
+        self.abs
+            .sock
+            .spoof_recv(self.abs.peer_addr, self.abs.dst_addr)
     }
 
     fn get_eph_port(packet: &Ipv4Packet) -> Option<u16> {
         let tcp_packet = TcpPacket::new(packet.payload())?;
 
         Some(tcp_packet.get_source())
+    }
+
+    fn is_final(&self, packet: TcpPacket<'_>) -> bool {
+        unimplemented!()
     }
 }

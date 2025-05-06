@@ -13,6 +13,7 @@ use std::{
     collections::HashMap,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
+    time::Duration,
 };
 use vpn_core::{
     logs::init_logger,
@@ -31,6 +32,8 @@ use tokio::{
         mpsc::{channel, Receiver, Sender},
         Mutex, RwLock,
     },
+    task::JoinHandle,
+    time::timeout,
 };
 
 mod echo;
@@ -118,8 +121,14 @@ async fn run_server() -> Result<()> {
     }
 }
 
+struct ClinetConn {
+    pub channel: Sender<Vec<u8>>,
+    pub out_link_handle: JoinHandle<()>,
+    pub in_link_handle: JoinHandle<()>,
+}
+
 async fn handle_client(stream: SecureStream) -> Result<()> {
-    let mut channels: HashMap<ConnIdent, Sender<Vec<u8>>> = HashMap::new();
+    let conns: Arc<RwLock<HashMap<ConnIdent, ClinetConn>>> = Arc::new(RwLock::new(HashMap::new()));
 
     let (mut tls_reader, mut tls_writer) = split(stream);
     let (in_sender, mut in_receiver) = channel(100);
@@ -129,24 +138,42 @@ async fn handle_client(stream: SecureStream) -> Result<()> {
         let mut buf = [0u8; MTU_SIZE];
         loop {
             let size = tls_reader.read(&mut buf).await.unwrap();
+            info!("Got packet from TLS");
             let (conn_ident, protocol, packet) = process_packet(&buf[..size]).unwrap();
 
-            if let Some(ch) = channels.get(&conn_ident) {
+            let mut conns_lock = conns.write().await;
+            if let Some(conn) = conns_lock.get(&conn_ident) {
                 info!("Found existing connection");
-                ch.send(buf[..size].to_owned()).await.unwrap();
+                conn.channel.send(buf[..size].to_owned()).await.unwrap();
             } else {
                 info!("Found new connection");
                 let (out_sender, out_receiver) = channel(10);
-                channels.insert(conn_ident, out_sender.clone());
                 out_sender.send(buf[..size].to_owned()).await.unwrap();
 
                 let link_send = in_sender.clone();
-                match protocol {
+                let link_handles = match protocol {
                     SupportedProtocol::Tcp => {
-                        init_links::<RawTcpSock, TcpConnection>(out_receiver, link_send, &packet)
-                            .await
+                        init_links::<RawTcpSock, TcpPacket, TcpConnection>(
+                            out_receiver,
+                            link_send,
+                            &packet,
+                            conn_ident,
+                            Arc::clone(&conns),
+                        )
+                        .await
                     }
-                }
+                };
+
+                info!("Lock is ready");
+                conns_lock.insert(
+                    conn_ident,
+                    ClinetConn {
+                        channel: out_sender,
+                        out_link_handle: link_handles.0,
+                        in_link_handle: link_handles.1,
+                    },
+                );
+                info!("Finished Writing");
             }
         }
     });
@@ -162,25 +189,51 @@ async fn handle_client(stream: SecureStream) -> Result<()> {
     Ok(())
 }
 
-async fn init_links<S, C>(
+async fn shutdown_conn(conn_ident: ConnIdent, conns: Arc<RwLock<HashMap<ConnIdent, ClinetConn>>>) {
+    if let Some(conn) = conns.read().await.get(&conn_ident) {
+        conn.out_link_handle.abort();
+        conn.in_link_handle.abort();
+    }
+
+    conns.write().await.remove(&conn_ident);
+}
+
+async fn init_links<S, P, C>(
     mut out_receiver: Receiver<Vec<u8>>,
     in_sender: Sender<Vec<u8>>,
     packet: &Ipv4Packet<'_>,
-) where
+    conn_ident: ConnIdent,
+    conns: Arc<RwLock<HashMap<ConnIdent, ClinetConn>>>,
+) -> (JoinHandle<()>, JoinHandle<()>)
+where
     S: RawSock,
-    C: Connection<S> + 'static,
+    P: Packet,
+    C: Connection<S, P> + 'static,
 {
-    let mut conn = create_conn::<S, C>(packet);
+    let mut conn = create_conn::<S, P, C>(packet);
 
-    tokio::spawn(async move {
+    let out_link_handle = tokio::spawn(async move {
         info!("Out-link running");
-        while let Some(mut packet) = out_receiver.recv().await {
-            info!("Forwarding...");
-            conn.send_to_remote_host(&mut packet).unwrap();
+        // while let Some(mut packet) = out_receiver.recv().await {
+        //     info!("Forwarding...");
+        //     conn.send_to_remote_host(&mut packet).unwrap();
+        // }
+        loop {
+            match timeout(Duration::from_secs(5), out_receiver.recv()).await {
+                Ok(Some(mut packet)) => {
+                    info!("Forwarding...");
+                    conn.send_to_remote_host(&mut packet).unwrap();
+                }
+                _ => {
+                    info!("Timout reached");
+                    shutdown_conn(conn_ident, conns).await;
+                    break;
+                }
+            }
         }
     });
 
-    tokio::spawn(async move {
+    let in_link_handle = tokio::spawn(async move {
         loop {
             match tokio::task::spawn_blocking(move || conn.recv_from_remote_host())
                 .await
@@ -196,6 +249,8 @@ async fn init_links<S, C>(
             }
         }
     });
+
+    (out_link_handle, in_link_handle)
 }
 
 fn process_packet(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol, Ipv4Packet)> {
@@ -219,10 +274,11 @@ fn process_packet(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol, Ipv4Packe
     return Some((res, protocol, packet));
 }
 
-fn create_conn<S, C>(packet: &Ipv4Packet) -> C
+fn create_conn<S, P, C>(packet: &Ipv4Packet) -> C
 where
     S: RawSock,
-    C: Connection<S>,
+    P: Packet,
+    C: Connection<S, P>,
 {
     C::create_from_packet(packet)
 }
@@ -232,7 +288,7 @@ fn get_ident_tcp(packet: TcpPacket, conn_ident: &mut ConnIdent) {
     conn_ident.dst_port = Some(packet.get_destination());
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct ConnIdent {
     dst_addr: Ipv4Addr,
     eph_port: Option<u16>,

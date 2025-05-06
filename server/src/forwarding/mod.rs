@@ -14,7 +14,7 @@ use pnet::packet::{
 use rand::Rng;
 use tokio::io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 
-use crate::{SecureStream, SERVER_CONFIG};
+use crate::SERVER_CONFIG;
 use vpn_core::{system::MTU_SIZE, Error, Result};
 
 mod tcp;
@@ -25,9 +25,6 @@ pub use tcp::{RawTcpSock, TcpConnection};
 //
 // mod udp;
 // pub use udp::UdpConnection;
-
-type SecureRead = ReadHalf<SecureStream>;
-type SecureWrite = WriteHalf<SecureStream>;
 
 #[derive(Clone, Copy)]
 pub struct AbstractSock {
@@ -104,13 +101,6 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
     fn spoof_out(&mut self, buf: &mut [u8], src_ip: Ipv4Addr) -> Option<(Vec<u8>, Ipv4Addr)> {
         let mut packet = MutableIpv4Packet::new(buf)?;
 
-        // debugging purposes
-        if packet.get_source() == Ipv4Addr::new(192, 168, 1, 64)
-            && packet.get_destination() == Ipv4Addr::new(172, 16, 0, 2)
-        {
-            info!("Found troubling packet");
-        }
-        //
         let peer_addr = packet.get_source();
 
         let mut payload = packet.payload().to_owned().clone();
@@ -128,7 +118,7 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
         self.get_abstract().send(packet)
     }
 
-    fn spoof_recv(&self, peer_ip: Ipv4Addr) -> Result<Vec<u8>> {
+    fn spoof_recv(&self, peer_ip: Ipv4Addr, dst_addr: Ipv4Addr) -> Result<Vec<u8>> {
         let mut rec_buf = [0u8; MTU_SIZE];
         unsafe {
             let data_size = recvfrom(
@@ -145,7 +135,8 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
             } else {
                 println!("received packet");
             }
-            if let Some(res) = self.spoof_in(&mut rec_buf[..data_size as usize], peer_ip) {
+            if let Some(res) = self.spoof_in(&mut rec_buf[..data_size as usize], peer_ip, dst_addr)
+            {
                 Ok(res)
             } else {
                 Err(Error::new(
@@ -156,11 +147,11 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
         }
     }
 
-    fn spoof_in(&self, buf: &mut [u8], peer_ip: Ipv4Addr) -> Option<Vec<u8>> {
+    fn spoof_in(&self, buf: &mut [u8], peer_ip: Ipv4Addr, dst_addr: Ipv4Addr) -> Option<Vec<u8>> {
         let mut packet = MutableIpv4Packet::new(buf)?;
 
-        // debugging purposes
-        if packet.get_source() == Ipv4Addr::new(192, 168, 1, 64) {
+        // filter traffic not meant the client
+        if packet.get_source() != dst_addr {
             info!("Packet is destined for {}", packet.get_destination());
             return None;
         }
@@ -192,7 +183,7 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
     ) -> Option<()>;
 }
 
-pub trait Connection<S: RawSock>: Send + Sync + Copy + From<AbstractConn<S>> {
+pub trait Connection<S: RawSock, P: Packet>: Send + Sync + Copy + From<AbstractConn<S>> {
     fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()>;
     fn recv_from_remote_host(&self) -> Result<Vec<u8>>;
 
@@ -205,11 +196,15 @@ pub trait Connection<S: RawSock>: Send + Sync + Copy + From<AbstractConn<S>> {
             sock,
             self_addr: SERVER_CONFIG.get_ipv4_addr(),
             peer_addr: packet.get_source(),
+            dst_addr: packet.get_destination(),
         }
         .into()
     }
+
+    fn is_final(&self, packet: P) -> bool;
 }
 
+#[derive(Clone, Copy)]
 pub struct AbstractConn<S>
 where
     S: RawSock,
@@ -217,4 +212,5 @@ where
     sock: S,
     self_addr: Ipv4Addr,
     peer_addr: Ipv4Addr,
+    dst_addr: Ipv4Addr,
 }
