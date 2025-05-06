@@ -23,8 +23,8 @@ pub use tcp::{RawTcpSock, TcpConnection};
 // mod icmp;
 // pub use icmp::IcmpConnection;
 //
-// mod udp;
-// pub use udp::UdpConnection;
+mod udp;
+pub use udp::{RawUdpSock, UdpConnection};
 
 #[derive(Clone, Copy)]
 pub struct AbstractSock {
@@ -200,8 +200,6 @@ pub trait Connection<S: RawSock, P: Packet>: Send + Sync + Copy + From<AbstractC
         }
         .into()
     }
-
-    fn is_final(&self, packet: P) -> bool;
 }
 
 #[derive(Clone, Copy)]

@@ -2,6 +2,7 @@ use pnet::packet::{
     ip::{IpNextHeaderProtocol, IpNextHeaderProtocols},
     ipv4::Ipv4Packet,
     tcp::TcpPacket,
+    udp::UdpPacket,
     Packet,
 };
 use tokio_rustls::TlsAcceptor;
@@ -39,7 +40,7 @@ use tokio::{
 mod echo;
 mod encryption;
 mod forwarding;
-use forwarding::{Connection, RawSock, RawTcpSock, TcpConnection};
+use forwarding::{Connection, RawSock, RawTcpSock, RawUdpSock, TcpConnection, UdpConnection};
 mod handshake;
 
 use echo::create_echo_reply;
@@ -162,6 +163,16 @@ async fn handle_client(stream: SecureStream) -> Result<()> {
                         )
                         .await
                     }
+                    SupportedProtocol::Udp => {
+                        init_links::<RawUdpSock, UdpPacket, UdpConnection>(
+                            out_receiver,
+                            link_send,
+                            &packet,
+                            conn_ident,
+                            Arc::clone(&conns),
+                        )
+                        .await
+                    }
                 };
 
                 info!("Lock is ready");
@@ -191,6 +202,7 @@ async fn handle_client(stream: SecureStream) -> Result<()> {
 
 async fn shutdown_conn(conn_ident: ConnIdent, conns: Arc<RwLock<HashMap<ConnIdent, ClinetConn>>>) {
     if let Some(conn) = conns.read().await.get(&conn_ident) {
+        info!("Sutting down!");
         conn.out_link_handle.abort();
         conn.in_link_handle.abort();
     }
@@ -214,12 +226,8 @@ where
 
     let out_link_handle = tokio::spawn(async move {
         info!("Out-link running");
-        // while let Some(mut packet) = out_receiver.recv().await {
-        //     info!("Forwarding...");
-        //     conn.send_to_remote_host(&mut packet).unwrap();
-        // }
         loop {
-            match timeout(Duration::from_secs(5), out_receiver.recv()).await {
+            match timeout(Duration::from_secs(1), out_receiver.recv()).await {
                 Ok(Some(mut packet)) => {
                     info!("Forwarding...");
                     conn.send_to_remote_host(&mut packet).unwrap();
@@ -266,6 +274,10 @@ fn process_packet(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol, Ipv4Packe
             get_ident_tcp(TcpPacket::new(packet.payload())?, &mut res);
             SupportedProtocol::Tcp
         }
+        IpNextHeaderProtocols::Udp => {
+            get_ident_udp(UdpPacket::new(packet.payload())?, &mut res);
+            SupportedProtocol::Udp
+        }
         _ => {
             return None;
         }
@@ -287,6 +299,10 @@ fn get_ident_tcp(packet: TcpPacket, conn_ident: &mut ConnIdent) {
     conn_ident.eph_port = Some(packet.get_source());
     conn_ident.dst_port = Some(packet.get_destination());
 }
+fn get_ident_udp(packet: UdpPacket, conn_ident: &mut ConnIdent) {
+    conn_ident.eph_port = Some(packet.get_source());
+    conn_ident.eph_port = Some(packet.get_destination());
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct ConnIdent {
@@ -298,4 +314,5 @@ struct ConnIdent {
 
 enum SupportedProtocol {
     Tcp,
+    Udp,
 }

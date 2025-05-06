@@ -96,8 +96,4 @@ impl Connection<RawTcpSock, TcpPacket<'_>> for TcpConnection {
 
         Some(tcp_packet.get_source())
     }
-
-    fn is_final(&self, packet: TcpPacket<'_>) -> bool {
-        unimplemented!()
-    }
 }
