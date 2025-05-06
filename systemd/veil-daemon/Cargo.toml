@@ -1,0 +1,10 @@
+[package]
+name = "veil-daemon"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+client = { path = "../../client" }
+log = "0.4.27"
+tokio = { version = "1.45.0", features = ["full"] }
+toml-cfg = "0.2.0"

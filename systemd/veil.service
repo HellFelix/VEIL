@@ -1,0 +1,17 @@
+[Unit]
+Description=My VPN Client Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=NOT SET
+Restart=on-failure
+RestartSec=3
+User=nobody
+Group=nogroup
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
