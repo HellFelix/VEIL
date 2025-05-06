@@ -13,26 +13,15 @@ use vpn_core::{
 mod tls;
 use tls::{Client, SecureStream};
 
-#[derive(Debug, Clone, Copy)]
-#[toml_cfg::toml_config()]
-pub struct ServerConfig {
-    #[default(0)]
+#[derive(Clone, Copy)]
+struct ServerConfig {
     pub address: u32,
-    #[default(0)]
     pub port: u16,
 }
 
-#[tokio::main]
-async fn main() {
-    match init().await {
-        Ok(_) => info!("System shut down without error"),
-        Err(e) => error!("System exited with {e:?}"),
-    }
-}
-
-async fn init() -> Result<()> {
+pub async fn init(address: u32, port: u16) -> Result<()> {
     init_logger("client", "info", false);
-    let client = Client::try_setup(3, SERVER_CONFIG).await?;
+    let client = Client::try_setup(3, ServerConfig { address, port }).await?;
     client.run().await;
     info!("Up and running!");
     Ok(())
