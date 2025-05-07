@@ -1,4 +1,4 @@
-use std::{error::Error as ErrType, fmt::Display, io, result};
+use std::{error::Error as ErrTrait, fmt::Display, io, net, ops::Not, result};
 
 #[derive(Debug)]
 pub enum ErrorKind {
@@ -17,16 +17,17 @@ pub enum ErrorKind {
     UnsupportedAction,
     UnsupportedProtocol,
 
+    Parse,
     Other,
 }
 
 #[derive(Debug)]
 pub struct Error {
     kind: ErrorKind,
-    inner: Box<dyn ErrType>,
+    inner: Box<dyn ErrTrait>,
 }
 impl Error {
-    pub fn new(kind: ErrorKind, inner: impl Into<Box<dyn ErrType>>) -> Self {
+    pub fn new(kind: ErrorKind, inner: impl Into<Box<dyn ErrTrait>>) -> Self {
         Self {
             kind,
             inner: inner.into(),
@@ -44,12 +45,20 @@ impl Display for Error {
     }
 }
 
-impl ErrType for Error {}
+impl ErrTrait for Error {}
 
 impl From<io::Error> for Error {
     fn from(value: io::Error) -> Self {
         Self {
             kind: ErrorKind::IO,
+            inner: Box::new(value),
+        }
+    }
+}
+impl From<net::AddrParseError> for Error {
+    fn from(value: net::AddrParseError) -> Self {
+        Self {
+            kind: ErrorKind::Parse,
             inner: Box::new(value),
         }
     }

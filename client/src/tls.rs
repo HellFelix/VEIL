@@ -1,6 +1,7 @@
 use std::{
     io::{Read, Write},
-    net::{Ipv4Addr, SocketAddrV4},
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    str::FromStr,
     sync::{
         mpsc::{channel, Receiver, TryRecvError},
         Arc,
@@ -28,7 +29,7 @@ use vpn_core::{
     Error, ErrorKind, Result,
 };
 
-use crate::ServerConfig;
+use crate::ServerConf;
 
 pub type SecureStream = TlsStream<TcpStream>;
 pub type SecureRead = ReadHalf<SecureStream>;
@@ -83,24 +84,11 @@ struct ClientSetup {
 }
 impl ClientSetup {
     pub fn finilize(self) -> Result<Client> {
-        let (trigger, flag) = channel();
-
-        // if let Err(e) = ctrlc::set_handler(move || {
-        //     info!("Got Keyboard interrupt. Shutting down");
-        //     trigger.send(());
-
-        //     sleep(Duration::from_millis(500));
-        //     info!("Graceful shutdown failed within permitted time.");
-        // }) {
-        //     warn!("Failed to set up graceful shutdown: {e}")
-        // }
-
         if let (Some(session_id), Some(interface)) = (self.session_id, self.interface) {
             Ok(Client {
                 stream: self.stream,
                 session_id,
                 interface,
-                shutdown_flag: flag,
             })
         } else {
             Err(Error::new(
@@ -110,12 +98,9 @@ impl ClientSetup {
         }
     }
 
-    pub async fn connect_to_server(server_config: ServerConfig) -> Result<Self> {
+    pub async fn connect_to_server(server_config: &ServerConf) -> Result<Self> {
         let connector = TlsConnector::from(Arc::new(get_tls_config()?));
-        let server_socket = SocketAddrV4::new(
-            Ipv4Addr::from_bits(server_config.address),
-            server_config.port,
-        );
+        let server_socket = SocketAddr::new(server_config.address, server_config.port);
         info!("Connecting to {server_socket}");
         let stream = connector
             .connect(
@@ -184,7 +169,6 @@ pub struct Client {
     stream: SecureStream,
     session_id: SessionID,
     interface: TunInterface,
-    shutdown_flag: Receiver<()>,
 }
 impl Client {
     // pub fn run_traffic(&mut self) -> Result<()> {
@@ -243,7 +227,7 @@ impl Client {
         }
     }
 
-    pub async fn try_setup(mut retries: u8, server_config: ServerConfig) -> Result<Self> {
+    pub async fn try_setup(mut retries: u8, server_config: &ServerConf) -> Result<Self> {
         loop {
             if retries == 0 {
                 break Err(Error::new(
