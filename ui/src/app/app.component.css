@@ -13,11 +13,11 @@ main {
 .selection-bar {
   padding-top: 10px;
   width: 220px;
-  background: #1c1c1c;
+  background: var(--bg-color);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.5);
+  box-shadow: 2px 0 5px var(--shadow-color);
 }
 
 .menu-item {
@@ -25,7 +25,7 @@ main {
   width: 100%;
   text-align: left;
   font-size: 18px;
-  color: #95959f;
+  color: var(--accent-primary-dark);
   border: none;
   background: transparent;
   position: relative;
@@ -34,22 +34,24 @@ main {
   transition: 0.3s;
 }
 .menu-item input[type="radio"] {
-    opacity: 0; /* Hide the default radio button */
-    position: absolute;
+  opacity: 0; /* Hide the default radio button */
+  position: absolute;
 }
 
 input[type="radio"]:checked + div {
-  background: #0a0a0a;
-  background: linear-gradient(0deg, rgba(10, 10, 10, 1) 0%, rgba(28, 28, 28, 1) 72%);
-  color: #00c9ff; /* Change text color */
+  background: linear-gradient(
+    0deg,
+    var(--bg-color) 0%,
+    var(--bg-color-alt) 72%
+  );
+  color: var(--accent-primary);
   padding-left: 2em;
 }
 
-  /* Hover Effect for Menu Items */
+/* Hover Effect for Menu Items */
 .menu-item-content:hover {
-    color: #fff;
-    background: #1e1e3a;
-    border-radius: 5px;
+  color: var(--accent-primary);
+  background: var(--surface-color-alt);
 }
 
 .menu-item-content {
@@ -69,7 +71,7 @@ input[type="radio"]:checked + div {
 
 /* Toolbar (top bar) */
 .toolbar {
-  background: #1e1e3a;
+  background: var(--bg-color-alt);
   display: flex;
   justify-content: flex-start;
   align-items: center;
@@ -77,7 +79,7 @@ input[type="radio"]:checked + div {
 
 .toolbar-btn {
   background: transparent;
-  color: #a0c4ff;
+  color: var(--accent-secondary-dark);
   font-size: 1em;
   border: 0px;
   padding: 20px 30px;
@@ -87,23 +89,24 @@ input[type="radio"]:checked + div {
 
 .toolbar-btn:hover {
   background: #2a2a3d;
-  color: #fff;
+  color: var(--accent-secondary);
 }
 
 /* Content Area */
 .content-area {
   padding: 20px;
-  background: #1e1e3a;
+  background: var(--surface-color);
+  color: var(--text-color);
   flex-grow: 1;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.6);
+  box-shadow: inset 0 0 10px var(--shadow-color);
 }
 
 .content-area h1 {
-  color: #a0c4ff;
+  color: var(--accent-primary);
   font-size: 36px;
 }
 
@@ -113,7 +116,7 @@ input[type="radio"]:checked + div {
   text-align: center;
 }
 
- /* The switch - the box around the slider */
+/* The switch - the box around the slider */
 .switch {
   position: relative;
   display: inline-block;
@@ -137,8 +140,8 @@ input[type="radio"]:checked + div {
   right: 0;
   bottom: 0;
   background-color: #ccc;
-  -webkit-transition: .4s;
-  transition: .4s;
+  -webkit-transition: 0.4s;
+  transition: 0.4s;
 }
 
 .slider:before {
@@ -149,16 +152,16 @@ input[type="radio"]:checked + div {
   left: 4px;
   bottom: 4px;
   background-color: white;
-  -webkit-transition: .4s;
-  transition: .4s;
+  -webkit-transition: 0.4s;
+  transition: 0.4s;
 }
 
 input:checked + .slider {
-  background-color: #2196F3;
+  background-color: #2196f3;
 }
 
 input:focus + .slider {
-  box-shadow: 0 0 1px #2196F3;
+  box-shadow: 0 0 1px #2196f3;
 }
 
 input:checked + .slider:before {
@@ -167,7 +170,7 @@ input:checked + .slider:before {
   transform: translateX(26px);
 }
 
-/* Rounded sliders */
+/* Rounded slider */
 .slider.round {
   border-radius: 34px;
 }

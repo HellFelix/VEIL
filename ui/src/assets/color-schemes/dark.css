@@ -1,0 +1,30 @@
+:root {
+  /* Background */
+  --bg-color: #121317;
+  --bg-color-alt: #1b1d22;
+
+  --surface-color: #1f2127;
+  --surface-color-alt: #2a2d33;
+  --border-color: #2c2f36;
+  --shadow-color: rgba(0, 0, 0, 0.4);
+
+  /* Text */
+  --text-color: #e4e6eb;
+  --accent-text: #f4f4f5;
+  --text-muted: #9ca3af;
+
+  /* Accent */
+  --accent-primary: #3ab7bf;
+  --accent-primary-dark: #2fa3ab;
+  --accent-secondary: #5bc0eb;
+  --accent-secondary-dark: #3fafff;
+  --accent-tertiary: #a78bfa;
+  --accent-tertiary-dark: #7f5af0;
+  --accent-quatenary: #e07a5f;
+  --accent-quatenary-dark: #b8624f;
+
+  /* Feedback */
+  --success-color: #22c55e;
+  --error-color: #ef4444;
+  --warning-color: #eab308;
+}
