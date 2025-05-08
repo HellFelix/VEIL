@@ -14,20 +14,17 @@ use pnet::packet::{
 use rand::Rng;
 use tokio::io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 
-use crate::SecureStream;
-use vpn_core::{system::MTU_SIZE, Result};
+use crate::SERVER_CONFIG;
+use vpn_core::{system::MTU_SIZE, Error, Result};
 
 mod tcp;
-pub use tcp::TcpConnection;
+pub use tcp::{RawTcpSock, TcpConnection};
 
-mod icmp;
-pub use icmp::IcmpConnection;
-
+// mod icmp;
+// pub use icmp::IcmpConnection;
+//
 mod udp;
-pub use udp::UdpConnection;
-
-type SecureRead = ReadHalf<SecureStream>;
-type SecureWrite = WriteHalf<SecureStream>;
+pub use udp::{RawUdpSock, UdpConnection};
 
 #[derive(Clone, Copy)]
 pub struct AbstractSock {
@@ -37,13 +34,6 @@ pub struct AbstractSock {
     spoofed_eph_port: u16,
 }
 impl AbstractSock {
-    pub fn set_eph_if_not(&mut self, eph_port: u16) {
-        match self.eph_port {
-            Some(_) => {}
-            None => self.eph_port = Some(eph_port),
-        }
-    }
-
     pub fn send(&self, spoofed_packet: Vec<u8>) -> Result<()> {
         unsafe {
             let res = sendto(
@@ -68,7 +58,7 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
     fn get_abstract(&self) -> AbstractSock;
 
     //TODO: Do error handling from kernel results
-    fn init(host_addr: Ipv4Addr) -> Self {
+    fn init(host_addr: Ipv4Addr, eph_port: Option<u16>) -> Self {
         //TODO: Set the range from the systems available ports
         let spoofed_eph_port = rand::rng().random_range(45000..54000);
 
@@ -96,7 +86,7 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
             Self::from(AbstractSock {
                 dst,
                 sock_r,
-                eph_port: None,
+                eph_port,
                 spoofed_eph_port,
             })
         }
@@ -110,6 +100,7 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
 
     fn spoof_out(&mut self, buf: &mut [u8], src_ip: Ipv4Addr) -> Option<(Vec<u8>, Ipv4Addr)> {
         let mut packet = MutableIpv4Packet::new(buf)?;
+
         let peer_addr = packet.get_source();
 
         let mut payload = packet.payload().to_owned().clone();
@@ -127,7 +118,7 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
         self.get_abstract().send(packet)
     }
 
-    fn spoof_recv(&self, peer_ip: Ipv4Addr) -> Result<Vec<u8>> {
+    fn spoof_recv(&self, peer_ip: Ipv4Addr, dst_addr: Ipv4Addr) -> Result<Vec<u8>> {
         let mut rec_buf = [0u8; MTU_SIZE];
         unsafe {
             let data_size = recvfrom(
@@ -144,14 +135,27 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
             } else {
                 println!("received packet");
             }
-            Ok(self
-                .spoof_in(&mut rec_buf[..data_size as usize], peer_ip)
-                .unwrap())
+            if let Some(res) = self.spoof_in(&mut rec_buf[..data_size as usize], peer_ip, dst_addr)
+            {
+                Ok(res)
+            } else {
+                Err(Error::new(
+                    vpn_core::ErrorKind::Dropped,
+                    format!("Packet dropped due to traffic rule"),
+                ))
+            }
         }
     }
 
-    fn spoof_in(&self, buf: &mut [u8], peer_ip: Ipv4Addr) -> Option<Vec<u8>> {
+    fn spoof_in(&self, buf: &mut [u8], peer_ip: Ipv4Addr, dst_addr: Ipv4Addr) -> Option<Vec<u8>> {
         let mut packet = MutableIpv4Packet::new(buf)?;
+
+        // filter traffic not meant the client
+        if packet.get_source() != dst_addr {
+            info!("Packet is destined for {}", packet.get_destination());
+            return None;
+        }
+        //
 
         let mut payload = packet.payload().to_owned().clone();
         self.spoof_ip_next_in(&mut payload, packet.get_source(), peer_ip);
@@ -172,39 +176,39 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
     ) -> Option<()>;
 
     fn spoof_ip_next_out(
-        &mut self,
+        &self,
         packet: &mut [u8],
         src_addr: Ipv4Addr,
         dst_addr: Ipv4Addr,
     ) -> Option<()>;
 }
 
-pub trait Connection: Send {
-    type SockType: RawSock;
+pub trait Connection<S: RawSock, P: Packet>: Send + Sync + Copy + From<AbstractConn<S>> {
+    fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()>;
+    fn recv_from_remote_host(&self) -> Result<Vec<u8>>;
 
-    async fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()>;
-    async fn recv_from_remote_host(&self) -> Result<Vec<u8>>;
+    fn get_eph_port(packet: &Ipv4Packet) -> Option<u16>;
 
-    async fn handle_recv(&self, mut tls_writer: SecureWrite) -> Result<()> {
-        info!("receiver running!");
-        loop {
-            let res = self.recv_from_remote_host().await?;
-            info!("Sending to client, {res:?}");
-            tls_writer.write_all(&res).await?;
+    fn create_from_packet(packet: &Ipv4Packet) -> Self {
+        let sock = S::init(packet.get_destination(), Self::get_eph_port(packet));
+
+        AbstractConn {
+            sock,
+            self_addr: SERVER_CONFIG.get_ipv4_addr(),
+            peer_addr: packet.get_source(),
+            dst_addr: packet.get_destination(),
         }
+        .into()
     }
+}
 
-    async fn handle_forward(&mut self, mut tls_reader: SecureRead) -> Result<()> {
-        info!("forwarder running!");
-        let mut buf = [0u8; MTU_SIZE];
-        loop {
-            let size = tls_reader.read(&mut buf).await?;
-
-            info!("Forwarding");
-            self.send_to_remote_host(&mut buf[..size]).await?;
-        }
-    }
-
-    async fn init_from(packet: &mut [u8], stream: SecureStream) -> Result<()>;
-    async fn run_forwarding(self, stream: SecureStream) -> Result<()>;
+#[derive(Clone, Copy)]
+pub struct AbstractConn<S>
+where
+    S: RawSock,
+{
+    sock: S,
+    self_addr: Ipv4Addr,
+    peer_addr: Ipv4Addr,
+    dst_addr: Ipv4Addr,
 }

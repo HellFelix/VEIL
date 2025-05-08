@@ -13,7 +13,7 @@ use vpn_core::Result;
 
 use crate::{SecureStream, SERVER_CONFIG};
 
-use super::{AbstractSock, Connection, RawSock};
+use super::{AbstractConn, AbstractSock, Connection, RawSock};
 
 #[derive(Clone, Copy)]
 pub struct RawUdpSock {
@@ -32,15 +32,13 @@ impl RawSock for RawUdpSock {
     }
 
     fn spoof_ip_next_out(
-        &mut self,
+        &self,
         packet: &mut [u8],
         src_addr: std::net::Ipv4Addr,
         dst_addr: std::net::Ipv4Addr,
     ) -> Option<()> {
         let mut udp_packet = MutableUdpPacket::new(packet)?;
         let eph_port = udp_packet.get_source();
-
-        self.abs.set_eph_if_not(eph_port);
 
         udp_packet.set_source(self.get_abstract().spoofed_eph_port);
         let udp_checksum =
@@ -66,51 +64,27 @@ impl RawSock for RawUdpSock {
 
 #[derive(Clone, Copy)]
 pub struct UdpConnection {
-    sock: RawUdpSock,
-    self_addr: Ipv4Addr,
-    peer_addr: Ipv4Addr,
+    abs: AbstractConn<RawUdpSock>,
 }
-impl Connection for UdpConnection {
-    type SockType = RawUdpSock;
 
-    async fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()> {
-        self.sock.spoof_send(packet, self.self_addr)
+impl From<AbstractConn<RawUdpSock>> for UdpConnection {
+    fn from(value: AbstractConn<RawUdpSock>) -> Self {
+        UdpConnection { abs: value }
     }
-    async fn recv_from_remote_host(&self) -> Result<Vec<u8>> {
-        self.sock.spoof_recv(self.peer_addr)
+}
+impl Connection<RawUdpSock, UdpPacket<'_>> for UdpConnection {
+    fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()> {
+        self.abs.sock.spoof_send(packet, self.abs.self_addr)
     }
-
-    async fn init_from(packet: &mut [u8], stream: SecureStream) -> Result<()> {
-        let ip_packet = Ipv4Packet::new(packet).unwrap();
-
-        let sock = RawUdpSock::init(ip_packet.get_destination());
-
-        let mut conn = Self {
-            sock,
-            self_addr: SERVER_CONFIG.get_ipv4_addr(),
-            peer_addr: ip_packet.get_source(),
-        };
-
-        conn.send_to_remote_host(packet).await?;
-
-        conn.run_forwarding(stream).await
+    fn recv_from_remote_host(&self) -> Result<Vec<u8>> {
+        self.abs
+            .sock
+            .spoof_recv(self.abs.peer_addr, self.abs.dst_addr)
     }
 
-    async fn run_forwarding(mut self, stream: SecureStream) -> Result<()> {
-        let (tls_reader, tls_writer) = split(stream);
+    fn get_eph_port(packet: &Ipv4Packet) -> Option<u16> {
+        let tcp_packet = UdpPacket::new(packet.payload())?;
 
-        let recv_handle = tokio::spawn(async move {
-            info!("starting receiver");
-            self.handle_recv(tls_writer).await.unwrap();
-        });
-
-        let forward_handle = tokio::spawn(async move {
-            info!("starting writer");
-            self.handle_forward(tls_reader).await.unwrap();
-        });
-
-        let (_recv_res, _forward_res) = tokio::join!(recv_handle, forward_handle);
-
-        Ok(())
+        Some(tcp_packet.get_source())
     }
 }

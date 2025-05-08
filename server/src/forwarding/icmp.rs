@@ -51,6 +51,7 @@ impl RawSock for RawIcmpSock {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct IcmpConnection {
     sock: RawIcmpSock,
 }

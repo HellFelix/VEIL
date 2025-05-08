@@ -1,11 +1,20 @@
+use pnet::packet::{
+    ip::{IpNextHeaderProtocol, IpNextHeaderProtocols},
+    ipv4::Ipv4Packet,
+    tcp::TcpPacket,
+    udp::UdpPacket,
+    Packet,
+};
 use tokio_rustls::TlsAcceptor;
 
 use encryption::get_tls_config;
 use handshake::SessionRegistry;
 use log::*;
 use std::{
+    collections::HashMap,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
+    time::Duration,
 };
 use vpn_core::{
     logs::init_logger,
@@ -18,15 +27,20 @@ use vpn_core::{
 };
 
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
+    io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
     net::{TcpListener, TcpStream},
-    sync::Mutex,
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Mutex, RwLock,
+    },
+    task::JoinHandle,
+    time::timeout,
 };
 
 mod echo;
 mod encryption;
 mod forwarding;
-use forwarding::{Connection, IcmpConnection, TcpConnection, UdpConnection};
+use forwarding::{Connection, RawSock, RawTcpSock, RawUdpSock, TcpConnection, UdpConnection};
 mod handshake;
 
 use echo::create_echo_reply;
@@ -108,23 +122,197 @@ async fn run_server() -> Result<()> {
     }
 }
 
-async fn handle_client(mut stream: SecureStream) -> Result<()> {
-    let mut read_buf = [0u8; MTU_SIZE];
+struct ClinetConn {
+    pub channel: Sender<Vec<u8>>,
+    pub out_link_handle: JoinHandle<()>,
+    pub in_link_handle: JoinHandle<()>,
+}
 
-    let size = stream.read(&mut read_buf).await?;
-    info!("Got from client {:?}", &read_buf[..size]);
+async fn handle_client(stream: SecureStream) -> Result<()> {
+    let conns: Arc<RwLock<HashMap<ConnIdent, ClinetConn>>> = Arc::new(RwLock::new(HashMap::new()));
 
-    match read_buf[9] {
-        1 => IcmpConnection::init_from(&mut read_buf[..size], stream).await?,
-        6 => TcpConnection::init_from(&mut read_buf[..size], stream).await?,
-        17 => UdpConnection::init_from(&mut read_buf[..size], stream).await?,
-        _ => {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Unknown next protocol"),
-            ))
+    let (mut tls_reader, mut tls_writer) = split(stream);
+    let (in_sender, mut in_receiver) = channel(100);
+
+    tokio::spawn(async move {
+        info!("Forwarder running");
+        let mut buf = [0u8; MTU_SIZE];
+        loop {
+            let size = tls_reader.read(&mut buf).await.unwrap();
+            info!("Got packet from TLS");
+            let (conn_ident, protocol, packet) = process_packet(&buf[..size]).unwrap();
+
+            let mut conns_lock = conns.write().await;
+            if let Some(conn) = conns_lock.get(&conn_ident) {
+                info!("Found existing connection");
+                conn.channel.send(buf[..size].to_owned()).await.unwrap();
+            } else {
+                info!("Found new connection");
+                let (out_sender, out_receiver) = channel(10);
+                out_sender.send(buf[..size].to_owned()).await.unwrap();
+
+                let link_send = in_sender.clone();
+                let link_handles = match protocol {
+                    SupportedProtocol::Tcp => {
+                        init_links::<RawTcpSock, TcpPacket, TcpConnection>(
+                            out_receiver,
+                            link_send,
+                            &packet,
+                            conn_ident,
+                            Arc::clone(&conns),
+                        )
+                        .await
+                    }
+                    SupportedProtocol::Udp => {
+                        init_links::<RawUdpSock, UdpPacket, UdpConnection>(
+                            out_receiver,
+                            link_send,
+                            &packet,
+                            conn_ident,
+                            Arc::clone(&conns),
+                        )
+                        .await
+                    }
+                };
+
+                info!("Lock is ready");
+                conns_lock.insert(
+                    conn_ident,
+                    ClinetConn {
+                        channel: out_sender,
+                        out_link_handle: link_handles.0,
+                        in_link_handle: link_handles.1,
+                    },
+                );
+                info!("Finished Writing");
+            }
         }
+    });
+
+    tokio::spawn(async move {
+        info!("Responder running");
+        while let Some(response) = in_receiver.recv().await {
+            info!("Responder got response {response:?}");
+            tls_writer.write_all(&response).await.unwrap();
+        }
+        info!("Responder done");
+    });
+    Ok(())
+}
+
+async fn shutdown_conn(conn_ident: ConnIdent, conns: Arc<RwLock<HashMap<ConnIdent, ClinetConn>>>) {
+    if let Some(conn) = conns.read().await.get(&conn_ident) {
+        info!("Sutting down!");
+        conn.out_link_handle.abort();
+        conn.in_link_handle.abort();
     }
 
-    Ok(())
+    conns.write().await.remove(&conn_ident);
+}
+
+async fn init_links<S, P, C>(
+    mut out_receiver: Receiver<Vec<u8>>,
+    in_sender: Sender<Vec<u8>>,
+    packet: &Ipv4Packet<'_>,
+    conn_ident: ConnIdent,
+    conns: Arc<RwLock<HashMap<ConnIdent, ClinetConn>>>,
+) -> (JoinHandle<()>, JoinHandle<()>)
+where
+    S: RawSock,
+    P: Packet,
+    C: Connection<S, P> + 'static,
+{
+    let mut conn = create_conn::<S, P, C>(packet);
+
+    let out_link_handle = tokio::spawn(async move {
+        info!("Out-link running");
+        loop {
+            match timeout(Duration::from_secs(1), out_receiver.recv()).await {
+                Ok(Some(mut packet)) => {
+                    info!("Forwarding...");
+                    conn.send_to_remote_host(&mut packet).unwrap();
+                }
+                _ => {
+                    info!("Timout reached");
+                    shutdown_conn(conn_ident, conns).await;
+                    break;
+                }
+            }
+        }
+    });
+
+    let in_link_handle = tokio::spawn(async move {
+        loop {
+            match tokio::task::spawn_blocking(move || conn.recv_from_remote_host())
+                .await
+                .unwrap()
+            {
+                Ok(res) => {
+                    info!("In-link sending");
+                    in_sender.send(res).await.unwrap();
+                }
+                Err(e) => {
+                    error!("{e}");
+                }
+            }
+        }
+    });
+
+    (out_link_handle, in_link_handle)
+}
+
+fn process_packet(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol, Ipv4Packet)> {
+    let packet = Ipv4Packet::new(buf)?;
+    let mut res = ConnIdent {
+        dst_addr: packet.get_destination(),
+        proto: packet.get_next_level_protocol(),
+        eph_port: None,
+        dst_port: None,
+    };
+    let protocol = match packet.get_next_level_protocol() {
+        IpNextHeaderProtocols::Tcp => {
+            get_ident_tcp(TcpPacket::new(packet.payload())?, &mut res);
+            SupportedProtocol::Tcp
+        }
+        IpNextHeaderProtocols::Udp => {
+            get_ident_udp(UdpPacket::new(packet.payload())?, &mut res);
+            SupportedProtocol::Udp
+        }
+        _ => {
+            return None;
+        }
+    };
+
+    return Some((res, protocol, packet));
+}
+
+fn create_conn<S, P, C>(packet: &Ipv4Packet) -> C
+where
+    S: RawSock,
+    P: Packet,
+    C: Connection<S, P>,
+{
+    C::create_from_packet(packet)
+}
+
+fn get_ident_tcp(packet: TcpPacket, conn_ident: &mut ConnIdent) {
+    conn_ident.eph_port = Some(packet.get_source());
+    conn_ident.dst_port = Some(packet.get_destination());
+}
+fn get_ident_udp(packet: UdpPacket, conn_ident: &mut ConnIdent) {
+    conn_ident.eph_port = Some(packet.get_source());
+    conn_ident.eph_port = Some(packet.get_destination());
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct ConnIdent {
+    dst_addr: Ipv4Addr,
+    eph_port: Option<u16>,
+    dst_port: Option<u16>,
+    proto: IpNextHeaderProtocol,
+}
+
+enum SupportedProtocol {
+    Tcp,
+    Udp,
 }

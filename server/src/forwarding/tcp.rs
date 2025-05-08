@@ -11,8 +11,7 @@ use pnet::packet::{
 };
 use tokio::io::split;
 
-use super::{AbstractSock, Connection, RawSock};
-use crate::{SecureStream, SERVER_CONFIG};
+use super::{AbstractConn, AbstractSock, Connection, RawSock};
 use vpn_core::Result;
 
 #[derive(Clone, Copy)]
@@ -32,15 +31,12 @@ impl RawSock for RawTcpSock {
     }
 
     fn spoof_ip_next_out(
-        &mut self,
+        &self,
         packet: &mut [u8],
         src_addr: Ipv4Addr,
         dst_addr: Ipv4Addr,
     ) -> Option<()> {
         let mut tcp_packet = MutableTcpPacket::new(packet)?;
-        let eph_port = tcp_packet.get_source();
-
-        self.abs.set_eph_if_not(eph_port);
 
         tcp_packet.set_source(self.get_abstract().spoofed_eph_port);
         let tcp_checksum =
@@ -63,54 +59,41 @@ impl RawSock for RawTcpSock {
         Some(())
     }
 }
-#[derive(Clone, Copy)]
-pub struct TcpConnection {
-    sock: RawTcpSock,
-    self_addr: Ipv4Addr,
-    peer_addr: Ipv4Addr,
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TcpState {
+    Run,
+    Fin,
 }
 
-impl Connection for TcpConnection {
-    type SockType = RawTcpSock;
+#[derive(Clone, Copy)]
+pub struct TcpConnection {
+    abs: AbstractConn<RawTcpSock>,
+    state: TcpState,
+}
 
-    async fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()> {
-        self.sock.spoof_send(packet, self.self_addr)
+impl From<AbstractConn<RawTcpSock>> for TcpConnection {
+    fn from(value: AbstractConn<RawTcpSock>) -> Self {
+        TcpConnection {
+            abs: value,
+            state: TcpState::Run,
+        }
     }
-    async fn recv_from_remote_host(&self) -> Result<Vec<u8>> {
-        self.sock.spoof_recv(self.peer_addr)
+}
+
+impl Connection<RawTcpSock, TcpPacket<'_>> for TcpConnection {
+    fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()> {
+        self.abs.sock.spoof_send(packet, self.abs.self_addr)
+    }
+    fn recv_from_remote_host(&self) -> Result<Vec<u8>> {
+        self.abs
+            .sock
+            .spoof_recv(self.abs.peer_addr, self.abs.dst_addr)
     }
 
-    async fn init_from(packet: &mut [u8], stream: SecureStream) -> Result<()> {
-        let ip_packet = Ipv4Packet::new(packet).unwrap();
+    fn get_eph_port(packet: &Ipv4Packet) -> Option<u16> {
+        let tcp_packet = TcpPacket::new(packet.payload())?;
 
-        let sock = RawTcpSock::init(ip_packet.get_destination());
-
-        let mut conn = Self {
-            sock,
-            self_addr: SERVER_CONFIG.get_ipv4_addr(),
-            peer_addr: ip_packet.get_source(),
-        };
-
-        conn.send_to_remote_host(packet).await?;
-
-        conn.run_forwarding(stream).await
-    }
-
-    async fn run_forwarding(mut self, stream: SecureStream) -> Result<()> {
-        let (tls_reader, tls_writer) = split(stream);
-
-        let recv_handle = tokio::spawn(async move {
-            info!("starting receiver");
-            self.handle_recv(tls_writer).await.unwrap();
-        });
-
-        let forward_handle = tokio::spawn(async move {
-            info!("starting writer");
-            self.handle_forward(tls_reader).await.unwrap();
-        });
-
-        let (_recv_res, _forward_res) = tokio::join!(recv_handle, forward_handle);
-
-        Ok(())
+        Some(tcp_packet.get_source())
     }
 }

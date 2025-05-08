@@ -7,6 +7,8 @@ pub enum ErrorKind {
     InvalidData,
     InvalidInput,
 
+    Dropped,
+
     // Handshake
     AddressClaimed,
     Rejection,
@@ -24,17 +26,16 @@ pub enum ErrorKind {
 #[derive(Debug)]
 pub struct Error {
     kind: ErrorKind,
-    inner: Box<dyn ErrTrait>,
+    inner: Box<dyn ErrTrait + Send + Sync>,
 }
 impl Error {
-    pub fn new(kind: ErrorKind, inner: impl Into<Box<dyn ErrTrait>>) -> Self {
+    pub fn new(kind: ErrorKind, inner: impl Into<Box<dyn ErrTrait + Send + Sync>>) -> Self {
         Self {
             kind,
             inner: inner.into(),
         }
     }
 }
-
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
