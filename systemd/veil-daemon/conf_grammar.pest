@@ -1,0 +1,33 @@
+
+WHITESPACE = _{ " " | "\t" | NEWLINE }
+COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
+NEWLINE = _{ "\r\n" | "\n" }
+
+config = { SOI ~ (COMMENT? ~ entry)* ~ EOI }
+
+entry = _{ COMMENT | block | pair }
+
+block = { key ~ "{" ~ (COMMENT? ~ entry)* ~ "}" }
+
+pair = { key ~ "=" ~ value }
+
+key = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+
+value = _{
+      boolean
+    | ipv4
+    | ipv6
+    | number
+    | quoted_string
+}
+
+boolean = { "true" | "false" }
+
+number = @{ ASCII_DIGIT+ }
+
+quoted_string = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+
+ipv4 = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+
+ipv6 = @{ (ASCII_HEX_DIGIT+ ~ ":")+ ~ ASCII_HEX_DIGIT+ }
+

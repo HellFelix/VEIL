@@ -1,34 +1,57 @@
+use std::{io::Read, net::IpAddr, os::unix::net::UnixListener};
+
+use bincode::{Decode, Encode};
 use log::*;
 
-use client;
+use client::commands::*;
+use client::{self, ServerConf};
 
-use toml_cfg;
-
-#[derive(Debug, Clone, Copy)]
-#[toml_cfg::toml_config()]
-pub struct ServerConfig {
-    #[default(0)]
-    pub address: u32,
-    #[default(0)]
-    pub port: u16,
-}
+mod conf;
+use conf::{ClientConf, extract_conf};
+use serde::{Deserialize, Serialize};
+use vpn_core::Result;
 
 #[tokio::main]
 async fn main() {
-    match client::init(SERVER_CONFIG.address, SERVER_CONFIG.port).await {
-        Ok(_) => info!("System shut down without error"),
-        Err(e) => error!("System exited with {e:?}"),
+    vpn_core::logs::init_logger("daemon", "info", false);
+    let conf = extract_conf().unwrap();
+
+    loop {
+        let listener = UnixListener::bind("/tmp/veil.sock").unwrap();
+
+        // accept connections and process them, spawning a new thread for each one
+        for stream in listener.incoming() {
+            match stream {
+                Ok(mut stream) => {
+                    let mut buf = Vec::new();
+                    stream.read_to_end(&mut buf).unwrap();
+
+                    info!("{buf:?}");
+
+                    let (command, _len): (Command, usize) =
+                        bincode::decode_from_slice(&buf[..], bincode::config::standard()).unwrap();
+
+                    match command {
+                        Command::Connect(server) => {
+                            connect(conf.servers.get(&server).unwrap()).await.unwrap()
+                        }
+                        _ => {}
+                    }
+                }
+                Err(err) => {
+                    /* connection failed */
+                    break;
+                }
+            }
+        }
     }
 }
 
-pub enum Commands {
-    Connect,
-    Disconnect,
+async fn connect(conf: &ServerConf) -> Result<()> {
+    match client::init(&conf).await {
+        Ok(_) => info!("System shut down without error"),
+        Err(e) => error!("System exited with {e:?}"),
+    }
 
-    Route,
-}
-
-enum RoutingRule {
-    Create,
-    Remove,
+    Ok(())
 }

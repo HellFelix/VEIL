@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=NOT SET
+ExecStart=~/dev/rust/veil/systemd/veil-daemon/target/debug/veil-daemon
 Restart=on-failure
 RestartSec=3
 User=nobody

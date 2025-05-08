@@ -1,0 +1,26 @@
+server {
+  address = xxx.xxx.xxx.xxx
+  # ipv = 6
+  ipv = 4
+  port = 1234
+}
+
+route {
+  route-all = true
+
+  # Applies only if route-all is true
+  exclude-route = {
+    host = {
+      ipv = 4
+      address = xxx.xxx.xxx.xxx
+    }
+    host = {
+      ipv = 6
+      address = hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh
+    }
+  }
+
+  # Applies only if route-all is false
+  include-route = {
+  }
+}
