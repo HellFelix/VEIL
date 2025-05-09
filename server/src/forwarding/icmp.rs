@@ -2,34 +2,27 @@ use libc::IPPROTO_ICMP;
 
 use log::*;
 
+use super::{AbstractConn, Connection, RawSock, SockOpts, StatelessSock};
+use crate::echo;
 use pnet::packet::{
     icmp::{IcmpPacket, IcmpTypes::EchoRequest},
     ipv4::Ipv4Packet,
     Packet,
 };
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
-    net::{TcpListener, TcpStream},
-    sync::Mutex,
-};
-use vpn_core::{network::SERVER_ADDR, system::MTU_SIZE};
-
-use super::{AbstractConn, AbstractSock, Connection, RawSock};
-use crate::echo;
 
 #[derive(Clone, Copy)]
 pub struct RawIcmpSock {
-    abs: AbstractSock,
+    abs: StatelessSock,
 }
-impl From<AbstractSock> for RawIcmpSock {
-    fn from(value: AbstractSock) -> Self {
+impl From<StatelessSock> for RawIcmpSock {
+    fn from(value: StatelessSock) -> Self {
         Self { abs: value }
     }
 }
-impl RawSock for RawIcmpSock {
+impl RawSock<StatelessSock> for RawIcmpSock {
     const IPPROTO: i32 = IPPROTO_ICMP;
 
-    fn get_abstract(&self) -> AbstractSock {
+    fn get_abstract(&self) -> StatelessSock {
         self.abs
     }
 
@@ -53,14 +46,14 @@ impl RawSock for RawIcmpSock {
 
 #[derive(Clone, Copy)]
 pub struct IcmpConnection {
-    abs: AbstractConn<RawIcmpSock>,
+    abs: AbstractConn<StatelessSock, RawIcmpSock>,
 }
-impl From<AbstractConn<RawIcmpSock>> for IcmpConnection {
-    fn from(value: AbstractConn<RawIcmpSock>) -> Self {
+impl From<AbstractConn<StatelessSock, RawIcmpSock>> for IcmpConnection {
+    fn from(value: AbstractConn<StatelessSock, RawIcmpSock>) -> Self {
         Self { abs: value }
     }
 }
-impl Connection<RawIcmpSock, IcmpPacket<'_>> for IcmpConnection {
+impl Connection<StatelessSock, RawIcmpSock, IcmpPacket<'_>> for IcmpConnection {
     fn send_to_remote_host(&mut self, packet: &mut [u8]) -> vpn_core::Result<()> {
         self.abs.sock.spoof_send(packet, self.abs.self_addr)
     }
@@ -70,7 +63,7 @@ impl Connection<RawIcmpSock, IcmpPacket<'_>> for IcmpConnection {
             .spoof_recv(self.abs.peer_addr, self.abs.dst_addr)
     }
 
-    fn get_eph_port(packet: &Ipv4Packet) -> Option<u16> {
-        None
+    fn get_conn_opts(packet: &Ipv4Packet) -> Option<SockOpts> {
+        Some(SockOpts { eph_port: None })
     }
 }

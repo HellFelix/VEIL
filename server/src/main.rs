@@ -1,4 +1,5 @@
 use pnet::packet::{
+    icmp::IcmpPacket,
     ip::{IpNextHeaderProtocol, IpNextHeaderProtocols},
     ipv4::Ipv4Packet,
     tcp::TcpPacket,
@@ -41,8 +42,8 @@ mod echo;
 mod encryption;
 mod forwarding;
 use forwarding::{
-    Connection, RawSock, RawTcpSock, RawUdpSock, SockStateType, StatefulSock, TcpConnection,
-    UdpConnection,
+    Connection, IcmpConnection, RawIcmpSock, RawSock, RawTcpSock, RawUdpSock, SockStateType,
+    StatefulSock, StatelessSock, TcpConnection, UdpConnection,
 };
 mod handshake;
 
@@ -125,14 +126,14 @@ async fn run_server() -> Result<()> {
     }
 }
 
-struct ClinetConn {
+struct ClientConn {
     pub channel: Sender<Vec<u8>>,
     pub out_link_handle: JoinHandle<()>,
     pub in_link_handle: JoinHandle<()>,
 }
 
 async fn handle_client(stream: SecureStream) -> Result<()> {
-    let conns: Arc<RwLock<HashMap<ConnIdent, ClinetConn>>> = Arc::new(RwLock::new(HashMap::new()));
+    let conns: Arc<RwLock<HashMap<ConnIdent, ClientConn>>> = Arc::new(RwLock::new(HashMap::new()));
 
     let (mut tls_reader, mut tls_writer) = split(stream);
     let (in_sender, mut in_receiver) = channel(100);
@@ -151,44 +152,21 @@ async fn handle_client(stream: SecureStream) -> Result<()> {
                 conn.channel.send(buf[..size].to_owned()).await.unwrap();
             } else {
                 info!("Found new connection");
-                let (out_sender, out_receiver) = channel(10);
-                out_sender.send(buf[..size].to_owned()).await.unwrap();
+                match protocol {
+                    SupportedProtocol::Stateful(p) => {
+                        let conn_comms =
+                            setup_stateful(packet, in_sender.clone(), p, conn_ident, &conns)
+                                .await
+                                .unwrap();
 
-                let link_send = in_sender.clone();
-                let link_handles = match protocol {
-                    SupportedProtocol::Tcp => {
-                        init_links::<StatefulSock, RawTcpSock, TcpPacket, TcpConnection>(
-                            out_receiver,
-                            link_send,
-                            &packet,
-                            conn_ident,
-                            Arc::clone(&conns),
-                        )
-                        .await
+                        info!("Lock is ready");
+                        conns_lock.insert(conn_ident, conn_comms);
+                        info!("Finished Writing");
                     }
-                    SupportedProtocol::Udp => {
-                        init_links::<StatefulSock, RawUdpSock, UdpPacket, UdpConnection>(
-                            out_receiver,
-                            link_send,
-                            &packet,
-                            conn_ident,
-                            Arc::clone(&conns),
-                        )
-                        .await
+                    SupportedProtocol::StateLess(p) => {
+                        handle_stateless(packet, p, in_sender.clone()).await;
                     }
                 }
-                .unwrap();
-
-                info!("Lock is ready");
-                conns_lock.insert(
-                    conn_ident,
-                    ClinetConn {
-                        channel: out_sender,
-                        out_link_handle: link_handles.0,
-                        in_link_handle: link_handles.1,
-                    },
-                );
-                info!("Finished Writing");
             }
         }
     });
@@ -204,7 +182,78 @@ async fn handle_client(stream: SecureStream) -> Result<()> {
     Ok(())
 }
 
-async fn shutdown_conn(conn_ident: ConnIdent, conns: Arc<RwLock<HashMap<ConnIdent, ClinetConn>>>) {
+async fn setup_stateful(
+    packet: Ipv4Packet<'_>,
+    in_sender: Sender<Vec<u8>>,
+    protocol: StatefulProtocol,
+    conn_ident: ConnIdent,
+    conns: &Arc<RwLock<HashMap<ConnIdent, ClientConn>>>,
+) -> Result<ClientConn> {
+    let (out_sender, out_receiver) = channel(10);
+    out_sender.send(packet.packet().to_owned()).await.unwrap();
+
+    let link_send = in_sender;
+    let link_handles = match protocol {
+        StatefulProtocol::Tcp => {
+            init_links::<StatefulSock, RawTcpSock, TcpPacket, TcpConnection>(
+                out_receiver,
+                link_send,
+                &packet,
+                conn_ident,
+                Arc::clone(conns),
+            )
+            .await
+        }
+        StatefulProtocol::Udp => {
+            init_links::<StatefulSock, RawUdpSock, UdpPacket, UdpConnection>(
+                out_receiver,
+                link_send,
+                &packet,
+                conn_ident,
+                Arc::clone(conns),
+            )
+            .await
+        }
+    }?;
+    Ok(ClientConn {
+        channel: out_sender,
+        out_link_handle: link_handles.0,
+        in_link_handle: link_handles.1,
+    })
+}
+
+async fn handle_stateless(
+    packet: Ipv4Packet<'_>,
+    protocol: StatelessProtocol,
+    in_sender: Sender<Vec<u8>>,
+) {
+    match protocol {
+        StatelessProtocol::Icmp => handle_icmp(packet, in_sender).await,
+    }
+}
+
+async fn handle_icmp(packet: Ipv4Packet<'_>, in_sender: Sender<Vec<u8>>) {
+    if packet.get_destination() == SERVER_ADDR {
+        in_sender
+            .send(create_echo_reply(packet.packet()).unwrap())
+            .await
+            .unwrap();
+    } else {
+        let mut conn = IcmpConnection::create_from_packet(&packet).unwrap();
+        let mut packet = packet.packet().to_owned();
+        conn.send_to_remote_host(&mut packet).unwrap();
+
+        tokio::spawn(async move {
+            let res = tokio::task::spawn_blocking(move || conn.recv_from_remote_host().unwrap())
+                .await
+                .unwrap();
+
+            in_sender.send(res).await.unwrap();
+        });
+    }
+}
+
+async fn shutdown_conn(conn_ident: ConnIdent, conns: Arc<RwLock<HashMap<ConnIdent, ClientConn>>>) {
     if let Some(conn) = conns.read().await.get(&conn_ident) {
         info!("Sutting down!");
         conn.out_link_handle.abort();
@@ -219,7 +268,7 @@ async fn init_links<T, S, P, C>(
     in_sender: Sender<Vec<u8>>,
     packet: &Ipv4Packet<'_>,
     conn_ident: ConnIdent,
-    conns: Arc<RwLock<HashMap<ConnIdent, ClinetConn>>>,
+    conns: Arc<RwLock<HashMap<ConnIdent, ClientConn>>>,
 ) -> Result<(JoinHandle<()>, JoinHandle<()>)>
 where
     T: SockStateType,
@@ -234,7 +283,7 @@ where
         loop {
             match timeout(Duration::from_secs(1), out_receiver.recv()).await {
                 Ok(Some(mut packet)) => {
-                    info!("Forwarding...");
+                    info!("Forwarding... {packet:?}");
                     conn.send_to_remote_host(&mut packet).unwrap();
                 }
                 _ => {
@@ -277,15 +326,13 @@ fn process_packet(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol, Ipv4Packe
     let protocol = match packet.get_next_level_protocol() {
         IpNextHeaderProtocols::Tcp => {
             get_ident_tcp(TcpPacket::new(packet.payload())?, &mut res);
-            SupportedProtocol::Tcp
+            SupportedProtocol::Stateful(StatefulProtocol::Tcp)
         }
         IpNextHeaderProtocols::Udp => {
             get_ident_udp(UdpPacket::new(packet.payload())?, &mut res);
-            SupportedProtocol::Udp
+            SupportedProtocol::Stateful(StatefulProtocol::Udp)
         }
-        IpNextHeaderProtocols::Icmp => {
-            unimplemented!()
-        }
+        IpNextHeaderProtocols::Icmp => SupportedProtocol::StateLess(StatelessProtocol::Icmp),
         _ => {
             return None;
         }
@@ -322,6 +369,15 @@ struct ConnIdent {
 }
 
 enum SupportedProtocol {
+    Stateful(StatefulProtocol),
+    StateLess(StatelessProtocol),
+}
+
+enum StatefulProtocol {
     Tcp,
     Udp,
+}
+
+enum StatelessProtocol {
+    Icmp,
 }

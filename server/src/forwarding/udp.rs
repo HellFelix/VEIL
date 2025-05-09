@@ -7,11 +7,8 @@ use pnet::packet::{
     udp::{self, MutableUdpPacket, UdpPacket},
     Packet,
 };
-use tokio::io::split;
 
 use vpn_core::Result;
-
-use crate::{SecureStream, SERVER_CONFIG};
 
 use super::{AbstractConn, Connection, RawSock, SockOpts, StatefulSock};
 

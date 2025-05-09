@@ -12,7 +12,6 @@ use pnet::packet::{
     Packet,
 };
 use rand::Rng;
-use tokio::io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 
 use crate::SERVER_CONFIG;
 use vpn_core::{system::MTU_SIZE, Error, Result};
@@ -20,8 +19,8 @@ use vpn_core::{system::MTU_SIZE, Error, Result};
 mod tcp;
 pub use tcp::{RawTcpSock, TcpConnection};
 
-// mod icmp;
-// pub use icmp::IcmpConnection;
+mod icmp;
+pub use icmp::{IcmpConnection, RawIcmpSock};
 
 mod udp;
 pub use udp::{RawUdpSock, UdpConnection};
