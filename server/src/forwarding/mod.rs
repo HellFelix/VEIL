@@ -1,4 +1,4 @@
-use std::{ffi::c_void, io, net::Ipv4Addr, ptr};
+use std::{ffi::c_void, io, marker::PhantomData, net::Ipv4Addr, ptr};
 
 use log::*;
 
@@ -22,7 +22,7 @@ pub use tcp::{RawTcpSock, TcpConnection};
 
 // mod icmp;
 // pub use icmp::IcmpConnection;
-//
+
 mod udp;
 pub use udp::{RawUdpSock, UdpConnection};
 
@@ -30,11 +30,9 @@ pub use udp::{RawUdpSock, UdpConnection};
 pub struct AbstractSock {
     dst: sockaddr_in,
     sock_r: i32,
-    eph_port: Option<u16>,
-    spoofed_eph_port: u16,
 }
 impl AbstractSock {
-    pub fn send(&self, spoofed_packet: Vec<u8>) -> Result<()> {
+    fn send(&self, spoofed_packet: Vec<u8>) -> Result<()> {
         unsafe {
             let res = sendto(
                 self.sock_r,
@@ -52,15 +50,60 @@ impl AbstractSock {
     }
 }
 
-pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
+pub struct SockOpts {
+    eph_port: Option<u16>,
+}
+
+pub trait SockStateType: Clone + Copy + Sized {
+    fn with_opts(abs: AbstractSock, opts: SockOpts) -> Result<Self>;
+
+    fn degenerate(&self) -> AbstractSock;
+}
+
+#[derive(Clone, Copy)]
+pub struct StatefulSock {
+    abs: AbstractSock,
+    eph_port: Option<u16>,
+    spoofed_eph_port: u16,
+}
+impl SockStateType for StatefulSock {
+    fn with_opts(abs: AbstractSock, opts: SockOpts) -> Result<Self> {
+        let spoofed_eph_port = rand::rng().random_range(45000..54000);
+
+        Ok(Self {
+            abs,
+            eph_port: opts.eph_port,
+            spoofed_eph_port,
+        })
+    }
+
+    fn degenerate(&self) -> AbstractSock {
+        self.abs
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct StatelessSock {
+    abs: AbstractSock,
+}
+impl SockStateType for StatelessSock {
+    fn with_opts(abs: AbstractSock, opts: SockOpts) -> Result<Self> {
+        Ok(Self { abs })
+    }
+
+    fn degenerate(&self) -> AbstractSock {
+        self.abs
+    }
+}
+
+pub trait RawSock<T: SockStateType>: Clone + Copy + Sized + From<T> {
     const IPPROTO: i32;
 
-    fn get_abstract(&self) -> AbstractSock;
+    fn get_abstract(&self) -> T;
 
     //TODO: Do error handling from kernel results
-    fn init(host_addr: Ipv4Addr, eph_port: Option<u16>) -> Self {
+    fn init(host_addr: Ipv4Addr, opts: SockOpts) -> Result<Self> {
         //TODO: Set the range from the systems available ports
-        let spoofed_eph_port = rand::rng().random_range(45000..54000);
 
         unsafe {
             let sock_r = socket(AF_INET, SOCK_RAW, Self::IPPROTO);
@@ -83,12 +126,10 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
                 std::mem::size_of_val(&enable) as libc::socklen_t,
             );
 
-            Self::from(AbstractSock {
-                dst,
-                sock_r,
-                eph_port,
-                spoofed_eph_port,
-            })
+            Ok(Self::from(T::with_opts(
+                AbstractSock { dst, sock_r },
+                opts,
+            )?))
         }
     }
 
@@ -115,14 +156,14 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
     }
 
     fn send(&self, packet: Vec<u8>) -> Result<()> {
-        self.get_abstract().send(packet)
+        self.get_abstract().degenerate().send(packet)
     }
 
     fn spoof_recv(&self, peer_ip: Ipv4Addr, dst_addr: Ipv4Addr) -> Result<Vec<u8>> {
         let mut rec_buf = [0u8; MTU_SIZE];
         unsafe {
             let data_size = recvfrom(
-                self.get_abstract().sock_r,
+                self.get_abstract().degenerate().sock_r,
                 rec_buf.as_mut_ptr() as *mut c_void,
                 rec_buf.len(),
                 0,
@@ -183,32 +224,41 @@ pub trait RawSock: Clone + Copy + Sized + From<AbstractSock> {
     ) -> Option<()>;
 }
 
-pub trait Connection<S: RawSock, P: Packet>: Send + Sync + Copy + From<AbstractConn<S>> {
+pub trait Connection<T: SockStateType, S: RawSock<T>, P: Packet>:
+    Send + Sync + Copy + From<AbstractConn<T, S>>
+{
     fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()>;
     fn recv_from_remote_host(&self) -> Result<Vec<u8>>;
 
-    fn get_eph_port(packet: &Ipv4Packet) -> Option<u16>;
+    fn get_conn_opts(packet: &Ipv4Packet) -> Option<SockOpts>;
 
-    fn create_from_packet(packet: &Ipv4Packet) -> Self {
-        let sock = S::init(packet.get_destination(), Self::get_eph_port(packet));
+    fn create_from_packet(packet: &Ipv4Packet) -> Result<Self> {
+        let sock = S::init(
+            packet.get_destination(),
+            Self::get_conn_opts(packet).unwrap(),
+        )?;
 
-        AbstractConn {
+        Ok(AbstractConn {
             sock,
+            _marker: PhantomData,
             self_addr: SERVER_CONFIG.get_ipv4_addr(),
             peer_addr: packet.get_source(),
             dst_addr: packet.get_destination(),
         }
-        .into()
+        .into())
     }
 }
 
 #[derive(Clone, Copy)]
-pub struct AbstractConn<S>
-where
-    S: RawSock,
-{
+pub struct AbstractConn<T: SockStateType, S: RawSock<T>> {
     sock: S,
+    _marker: PhantomData<T>,
     self_addr: Ipv4Addr,
     peer_addr: Ipv4Addr,
     dst_addr: Ipv4Addr,
+}
+
+pub enum ConnectionType {
+    StateFul,
+    StateLess,
 }

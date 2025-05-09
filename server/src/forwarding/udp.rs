@@ -13,21 +13,21 @@ use vpn_core::Result;
 
 use crate::{SecureStream, SERVER_CONFIG};
 
-use super::{AbstractConn, AbstractSock, Connection, RawSock};
+use super::{AbstractConn, Connection, RawSock, SockOpts, StatefulSock};
 
 #[derive(Clone, Copy)]
 pub struct RawUdpSock {
-    abs: AbstractSock,
+    abs: StatefulSock,
 }
-impl From<AbstractSock> for RawUdpSock {
-    fn from(value: AbstractSock) -> Self {
+impl From<StatefulSock> for RawUdpSock {
+    fn from(value: StatefulSock) -> Self {
         Self { abs: value }
     }
 }
-impl RawSock for RawUdpSock {
+impl RawSock<StatefulSock> for RawUdpSock {
     const IPPROTO: i32 = IPPROTO_UDP;
 
-    fn get_abstract(&self) -> AbstractSock {
+    fn get_abstract(&self) -> StatefulSock {
         self.abs
     }
 
@@ -64,15 +64,15 @@ impl RawSock for RawUdpSock {
 
 #[derive(Clone, Copy)]
 pub struct UdpConnection {
-    abs: AbstractConn<RawUdpSock>,
+    abs: AbstractConn<StatefulSock, RawUdpSock>,
 }
 
-impl From<AbstractConn<RawUdpSock>> for UdpConnection {
-    fn from(value: AbstractConn<RawUdpSock>) -> Self {
+impl From<AbstractConn<StatefulSock, RawUdpSock>> for UdpConnection {
+    fn from(value: AbstractConn<StatefulSock, RawUdpSock>) -> Self {
         UdpConnection { abs: value }
     }
 }
-impl Connection<RawUdpSock, UdpPacket<'_>> for UdpConnection {
+impl Connection<StatefulSock, RawUdpSock, UdpPacket<'_>> for UdpConnection {
     fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()> {
         self.abs.sock.spoof_send(packet, self.abs.self_addr)
     }
@@ -82,9 +82,11 @@ impl Connection<RawUdpSock, UdpPacket<'_>> for UdpConnection {
             .spoof_recv(self.abs.peer_addr, self.abs.dst_addr)
     }
 
-    fn get_eph_port(packet: &Ipv4Packet) -> Option<u16> {
-        let tcp_packet = UdpPacket::new(packet.payload())?;
+    fn get_conn_opts(packet: &Ipv4Packet) -> Option<SockOpts> {
+        let next_layer_packet = UdpPacket::new(packet.payload())?;
 
-        Some(tcp_packet.get_source())
+        Some(SockOpts {
+            eph_port: Some(next_layer_packet.get_source()),
+        })
     }
 }

@@ -40,7 +40,10 @@ use tokio::{
 mod echo;
 mod encryption;
 mod forwarding;
-use forwarding::{Connection, RawSock, RawTcpSock, RawUdpSock, TcpConnection, UdpConnection};
+use forwarding::{
+    Connection, RawSock, RawTcpSock, RawUdpSock, SockStateType, StatefulSock, TcpConnection,
+    UdpConnection,
+};
 mod handshake;
 
 use echo::create_echo_reply;
@@ -154,7 +157,7 @@ async fn handle_client(stream: SecureStream) -> Result<()> {
                 let link_send = in_sender.clone();
                 let link_handles = match protocol {
                     SupportedProtocol::Tcp => {
-                        init_links::<RawTcpSock, TcpPacket, TcpConnection>(
+                        init_links::<StatefulSock, RawTcpSock, TcpPacket, TcpConnection>(
                             out_receiver,
                             link_send,
                             &packet,
@@ -164,7 +167,7 @@ async fn handle_client(stream: SecureStream) -> Result<()> {
                         .await
                     }
                     SupportedProtocol::Udp => {
-                        init_links::<RawUdpSock, UdpPacket, UdpConnection>(
+                        init_links::<StatefulSock, RawUdpSock, UdpPacket, UdpConnection>(
                             out_receiver,
                             link_send,
                             &packet,
@@ -173,7 +176,8 @@ async fn handle_client(stream: SecureStream) -> Result<()> {
                         )
                         .await
                     }
-                };
+                }
+                .unwrap();
 
                 info!("Lock is ready");
                 conns_lock.insert(
@@ -210,19 +214,20 @@ async fn shutdown_conn(conn_ident: ConnIdent, conns: Arc<RwLock<HashMap<ConnIden
     conns.write().await.remove(&conn_ident);
 }
 
-async fn init_links<S, P, C>(
+async fn init_links<T, S, P, C>(
     mut out_receiver: Receiver<Vec<u8>>,
     in_sender: Sender<Vec<u8>>,
     packet: &Ipv4Packet<'_>,
     conn_ident: ConnIdent,
     conns: Arc<RwLock<HashMap<ConnIdent, ClinetConn>>>,
-) -> (JoinHandle<()>, JoinHandle<()>)
+) -> Result<(JoinHandle<()>, JoinHandle<()>)>
 where
-    S: RawSock,
+    T: SockStateType,
+    S: RawSock<T>,
     P: Packet,
-    C: Connection<S, P> + 'static,
+    C: Connection<T, S, P> + 'static,
 {
-    let mut conn = create_conn::<S, P, C>(packet);
+    let mut conn = create_conn::<T, S, P, C>(packet)?;
 
     let out_link_handle = tokio::spawn(async move {
         info!("Out-link running");
@@ -258,7 +263,7 @@ where
         }
     });
 
-    (out_link_handle, in_link_handle)
+    Ok((out_link_handle, in_link_handle))
 }
 
 fn process_packet(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol, Ipv4Packet)> {
@@ -278,6 +283,9 @@ fn process_packet(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol, Ipv4Packe
             get_ident_udp(UdpPacket::new(packet.payload())?, &mut res);
             SupportedProtocol::Udp
         }
+        IpNextHeaderProtocols::Icmp => {
+            unimplemented!()
+        }
         _ => {
             return None;
         }
@@ -286,11 +294,12 @@ fn process_packet(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol, Ipv4Packe
     return Some((res, protocol, packet));
 }
 
-fn create_conn<S, P, C>(packet: &Ipv4Packet) -> C
+fn create_conn<T, S, P, C>(packet: &Ipv4Packet) -> Result<C>
 where
-    S: RawSock,
+    T: SockStateType,
+    S: RawSock<T>,
     P: Packet,
-    C: Connection<S, P>,
+    C: Connection<T, S, P>,
 {
     C::create_from_packet(packet)
 }

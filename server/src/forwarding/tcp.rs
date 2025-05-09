@@ -11,22 +11,22 @@ use pnet::packet::{
 };
 use tokio::io::split;
 
-use super::{AbstractConn, AbstractSock, Connection, RawSock};
+use super::{AbstractConn, Connection, RawSock, SockOpts, StatefulSock};
 use vpn_core::Result;
 
 #[derive(Clone, Copy)]
 pub struct RawTcpSock {
-    abs: AbstractSock,
+    abs: StatefulSock,
 }
-impl From<AbstractSock> for RawTcpSock {
-    fn from(value: AbstractSock) -> Self {
+impl From<StatefulSock> for RawTcpSock {
+    fn from(value: StatefulSock) -> Self {
         Self { abs: value }
     }
 }
-impl RawSock for RawTcpSock {
+impl RawSock<StatefulSock> for RawTcpSock {
     const IPPROTO: i32 = IPPROTO_TCP;
 
-    fn get_abstract(&self) -> AbstractSock {
+    fn get_abstract(&self) -> StatefulSock {
         self.abs
     }
 
@@ -68,12 +68,12 @@ enum TcpState {
 
 #[derive(Clone, Copy)]
 pub struct TcpConnection {
-    abs: AbstractConn<RawTcpSock>,
+    abs: AbstractConn<StatefulSock, RawTcpSock>,
     state: TcpState,
 }
 
-impl From<AbstractConn<RawTcpSock>> for TcpConnection {
-    fn from(value: AbstractConn<RawTcpSock>) -> Self {
+impl From<AbstractConn<StatefulSock, RawTcpSock>> for TcpConnection {
+    fn from(value: AbstractConn<StatefulSock, RawTcpSock>) -> Self {
         TcpConnection {
             abs: value,
             state: TcpState::Run,
@@ -81,7 +81,7 @@ impl From<AbstractConn<RawTcpSock>> for TcpConnection {
     }
 }
 
-impl Connection<RawTcpSock, TcpPacket<'_>> for TcpConnection {
+impl Connection<StatefulSock, RawTcpSock, TcpPacket<'_>> for TcpConnection {
     fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()> {
         self.abs.sock.spoof_send(packet, self.abs.self_addr)
     }
@@ -91,9 +91,11 @@ impl Connection<RawTcpSock, TcpPacket<'_>> for TcpConnection {
             .spoof_recv(self.abs.peer_addr, self.abs.dst_addr)
     }
 
-    fn get_eph_port(packet: &Ipv4Packet) -> Option<u16> {
-        let tcp_packet = TcpPacket::new(packet.payload())?;
+    fn get_conn_opts(packet: &Ipv4Packet) -> Option<SockOpts> {
+        let next_layer_packet = TcpPacket::new(packet.payload())?;
 
-        Some(tcp_packet.get_source())
+        Some(SockOpts {
+            eph_port: Some(next_layer_packet.get_source()),
+        })
     }
 }
