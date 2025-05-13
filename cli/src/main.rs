@@ -10,7 +10,10 @@ use bincode::config;
 use client::commands::*;
 
 fn main() {
-    println!("{:?}", try_parse());
+    match try_parse() {
+        Ok(cmd) => send_to_service(cmd),
+        Err(e) => println!("{e}"),
+    }
 }
 
 fn try_parse() -> io::Result<Command> {
@@ -18,7 +21,6 @@ fn try_parse() -> io::Result<Command> {
     args.next();
 
     let cmd = if let Some(action) = args.next() {
-        println!("{action}");
         match &action[..] {
             "connect" => Command::Connect(parse_connect(args)?),
             "disconnect" => Command::Disconnect(parse_disconnect(args)?),
@@ -273,11 +275,14 @@ fn parse_permission(arg: String) -> io::Result<Permission> {
 }
 
 fn send_to_service(cmd: Command) {
-    let mut stream = UnixStream::connect("/tmp/veil.sock").unwrap();
+    let mut stream = UnixStream::connect("/tmp/veil.sock")
+        .expect("Failed to connect to unix socket. Is client service running?");
 
     let config = config::standard();
     let encoded: Vec<u8> = bincode::encode_to_vec(&cmd, config).unwrap();
     println!("{encoded:?}");
 
-    stream.write_all(&encoded).unwrap();
+    stream
+        .write_all(&encoded)
+        .expect("Failed to write to unix socket. Is client running?");
 }
