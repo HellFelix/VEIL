@@ -46,12 +46,32 @@ fn try_parse() -> io::Result<Command> {
 fn parse_connect(mut args: Args) -> io::Result<ServerAddr> {
     let res = if let Some(flag) = args.next() {
         match &flag[..] {
-            "-a" => Ok(ServerAddr::Override(get_addr(args.next().ok_or(
-                Error::new(ErrorKind::InvalidInput, format!("Address was not provided")),
-            )?)?)),
-            "--address" => Ok(ServerAddr::Override(get_addr(args.next().ok_or(
-                Error::new(ErrorKind::InvalidInput, format!("Address was not provided")),
-            )?)?)),
+            "-o" => Ok(ServerAddr::Override(
+                get_addr(args.next().ok_or(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Address was not provided"),
+                ))?)?,
+                args.next()
+                    .ok_or(Error::new(
+                        ErrorKind::InvalidInput,
+                        format!("Port was not provided"),
+                    ))?
+                    .parse::<u16>()
+                    .expect("Parsing failed"),
+            )),
+            "--override" => Ok(ServerAddr::Override(
+                get_addr(args.next().ok_or(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Address was not provided"),
+                ))?)?,
+                args.next()
+                    .ok_or(Error::new(
+                        ErrorKind::InvalidInput,
+                        format!("Port was not provided"),
+                    ))?
+                    .parse::<u16>()
+                    .expect("Parsing failed"),
+            )),
 
             "-n" => Ok(ServerAddr::Configured(args.next().ok_or(Error::new(
                 ErrorKind::InvalidInput,
