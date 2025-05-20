@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Encode, Decode, Debug)]
 pub enum Command {
     /// Connect to server at provided address
-    /// `veil connect -a {address}`
-    /// `veil connect --address {address}`
+    /// `veil connect -o {address} {port}`
+    /// `veil connect --override {address} {port}`
     ///
     /// Connect to server from configured servers
     /// `veil connect -n {name}`
@@ -66,7 +66,7 @@ pub enum Command {
 pub enum ServerAddr {
     Default,
     Configured(String),
-    Override(IpAddr),
+    Override(IpAddr, u16),
 }
 
 #[derive(Serialize, Deserialize, Encode, Decode, Debug)]

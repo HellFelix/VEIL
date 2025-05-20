@@ -65,9 +65,9 @@ pub type SecureWrite = WriteHalf<SecureStream>;
 // }
 
 fn get_tls_config() -> Result<ClientConfig> {
-    let client_cert = load_certs("../../certs/client.crt")?;
-    let client_key = load_private_key("../../certs/client.key")?;
-    let roots = load_root_cert_store("../../certs/rootCA.pem")?;
+    let client_cert = load_certs("/etc/systemd/veil/certs/client.crt")?;
+    let client_key = load_private_key("/etc/systemd/veil/certs/client.key")?;
+    let roots = load_root_cert_store("/etc/systemd/veil/certs/rootCA.pem")?;
 
     Ok(ClientConfig::builder_with_protocol_versions(&[&TLS13])
         .with_root_certificates(roots)
