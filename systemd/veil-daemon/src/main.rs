@@ -1,9 +1,7 @@
 use std::env::args;
-use std::os::unix::process::CommandExt;
 use std::{io, process};
 use std::{io::Read, net::IpAddr, os::unix::net::UnixListener};
 
-use bincode::{Decode, Encode};
 use log::*;
 
 use client::commands::*;
@@ -12,7 +10,7 @@ use client::{self, ServerConf};
 mod conf;
 use conf::{ClientConf, extract_conf};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::{Receiver, channel};
+use tokio::sync::broadcast::{Receiver, channel};
 use vpn_core::Result;
 
 #[tokio::main]
@@ -26,7 +24,7 @@ async fn main() {
 
     // accept connections and process them, spawning a new thread for each one
     loop {
-        let (sender, receiver) = channel(100);
+        let (sender, _) = channel::<Command>(100);
         for stream in listener.incoming() {
             match stream {
                 Ok(mut stream) => {
@@ -40,18 +38,25 @@ async fn main() {
                     match command {
                         Command::Connect(server) => match server {
                             ServerAddr::Default => {
-                                connect(conf.servers.get(&String::from("main")).unwrap(), receiver)
-                                    .await
+                                connect(
+                                    conf.servers.get(&String::from("main")).unwrap(),
+                                    sender.subscribe(),
+                                )
+                                .await
                             }
                             ServerAddr::Configured(name) => {
-                                connect(conf.servers.get(&name).unwrap(), receiver).await
+                                connect(
+                                    conf.servers.get(&name.to_owned()).unwrap(),
+                                    sender.subscribe(),
+                                )
+                                .await
                             }
                             ServerAddr::Override(address, port) => {
-                                connect(&ServerConf { address, port }, receiver).await
+                                connect(&ServerConf { address, port }, sender.subscribe()).await
                             }
                         },
                         Command::Disconnect(_forceful) => {
-                            sender.send(Command::Disconnect(_forceful)).await.unwrap()
+                            sender.send(Command::Disconnect(_forceful)).unwrap();
                         }
                         _ => {}
                     }
@@ -79,7 +84,7 @@ fn grant_rw_acl(path: &str, user: &str) -> io::Result<()> {
         ))
     }
 }
-async fn connect(conf: &ServerConf, controller: Receiver<Command>) {
+async fn connect(conf: &ServerConf, controller: Receiver<Command<'static>>) {
     match client::init(&conf, controller).await {
         Ok(_) => info!("System shut down without error"),
         Err(e) => error!("System exited with {e:?}"),

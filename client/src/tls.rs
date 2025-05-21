@@ -15,6 +15,7 @@ use tokio::{
     io::{split, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf},
     net::{TcpStream, UnixStream},
     sync::{
+        broadcast,
         mpsc::{channel, Receiver, Sender},
         Mutex,
     },
@@ -35,35 +36,6 @@ use crate::{commands::Command, ServerConf};
 pub type SecureStream = TlsStream<TcpStream>;
 pub type SecureRead = ReadHalf<SecureStream>;
 pub type SecureWrite = WriteHalf<SecureStream>;
-// impl SecureStream {
-//     pub fn new(conn: ClientConnection, sock: TcpStream) -> Self {
-//         Self(StreamOwned::new(conn, sock))
-//     }
-//     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-//         Ok(self.0.read(buf)?)
-//     }
-//     pub fn write_all(&mut self, buf: &[u8]) -> Result<()> {
-//         Ok(self.0.write_all(buf)?)
-//     }
-//
-//     fn shutdown(&mut self) -> Result<()> {
-//         info!("Closing TLS connection");
-//         self.0.conn.send_close_notify();
-//
-//         self.0.flush()?;
-//
-//         self.0.sock.shutdown(std::net::Shutdown::Both)?;
-//
-//         Ok(())
-//     }
-// }
-// impl Drop for SecureStream {
-//     fn drop(&mut self) {
-//         if let Err(e) = self.shutdown() {
-//             error!("Encountered error during shutdown: {e}");
-//         }
-//     }
-// }
 
 fn get_tls_config() -> Result<ClientConfig> {
     let client_cert = load_certs("/etc/veil/certs/client.crt")?;
@@ -172,7 +144,7 @@ pub struct Client {
     interface: TunInterface,
 }
 impl Client {
-    pub async fn run(self, controller: Receiver<Command<'static>>) {
+    pub async fn run(self, controller: broadcast::Receiver<Command<'static>>) {
         let (sender, receiver) = channel(100);
         let (tls_reader, tls_writer) = split(self.stream);
         let interface = self.interface.clone();
@@ -238,11 +210,11 @@ impl Client {
 
     async fn handle_unix_read(
         sender: Sender<Vec<u8>>,
-        controller: Arc<Mutex<Receiver<Command<'_>>>>,
+        controller: Arc<Mutex<broadcast::Receiver<Command<'_>>>>,
         session_id: SessionID,
     ) -> Result<()> {
         let mut controller_lock = controller.lock().await;
-        while let Some(cmd) = controller_lock.recv().await {
+        while let Ok(cmd) = controller_lock.recv().await {
             match cmd {
                 Command::Disconnect(forceful) => {
                     if forceful {

@@ -1,7 +1,7 @@
 use commands::Command;
 use log::*;
 use pnet::packet::ipv4::Ipv4Packet;
-use tokio::{net::UnixStream, sync::mpsc::Receiver};
+use tokio::{net::UnixStream, sync::broadcast::Receiver};
 
 use std::{io, net::IpAddr};
 
