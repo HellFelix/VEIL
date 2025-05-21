@@ -300,7 +300,7 @@ fn send_to_service(cmd: Command) {
 
     let config = config::standard();
     let encoded: Vec<u8> = bincode::encode_to_vec(&cmd, config).unwrap();
-    println!("{encoded:?}");
+    println!("{cmd:?}");
 
     stream
         .write_all(&encoded)
