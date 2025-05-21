@@ -4,11 +4,10 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=~/dev/rust/veil/systemd/veil-daemon/target/debug/veil-daemon
-Restart=on-failure
-RestartSec=3
-User=nobody
-Group=nogroup
+ExecStart=/bin/veil-daemon hellfelix
+ExecStopPost=rm /tmp/veil.sock
+Restart=no
+User=root
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
 NoNewPrivileges=true

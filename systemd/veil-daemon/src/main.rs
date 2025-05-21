@@ -1,3 +1,6 @@
+use std::env::args;
+use std::os::unix::process::CommandExt;
+use std::{io, process};
 use std::{io::Read, net::IpAddr, os::unix::net::UnixListener};
 
 use bincode::{Decode, Encode};
@@ -9,17 +12,21 @@ use client::{self, ServerConf};
 mod conf;
 use conf::{ClientConf, extract_conf};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::{Receiver, channel};
 use vpn_core::Result;
 
 #[tokio::main]
 async fn main() {
+    let mut exec_args = args().skip(1);
     vpn_core::logs::init_logger("daemon", "info", false);
+    let listener = UnixListener::bind("/tmp/veil.sock").unwrap();
+    grant_rw_acl("/tmp/veil.sock", &exec_args.next().unwrap()).unwrap();
+
     let conf = extract_conf().unwrap();
 
+    // accept connections and process them, spawning a new thread for each one
     loop {
-        let listener = UnixListener::bind("/tmp/veil.sock").unwrap();
-
-        // accept connections and process them, spawning a new thread for each one
+        let (sender, receiver) = channel(100);
         for stream in listener.incoming() {
             match stream {
                 Ok(mut stream) => {
@@ -28,17 +35,28 @@ async fn main() {
 
                     info!("{buf:?}");
 
-                    let (command, _len): (Command, usize) =
-                        bincode::decode_from_slice(&buf[..], bincode::config::standard()).unwrap();
+                    let (command, _len): (Command, usize) = bincode::deserialize(&buf[..]).unwrap();
 
                     match command {
-                        Command::Connect(server) => {
-                            connect(conf.servers.get(&server).unwrap()).await.unwrap()
+                        Command::Connect(server) => match server {
+                            ServerAddr::Default => {
+                                connect(conf.servers.get(&String::from("main")).unwrap(), receiver)
+                                    .await
+                            }
+                            ServerAddr::Configured(name) => {
+                                connect(conf.servers.get(&name).unwrap(), receiver).await
+                            }
+                            ServerAddr::Override(address, port) => {
+                                connect(&ServerConf { address, port }, receiver).await
+                            }
+                        },
+                        Command::Disconnect(_forceful) => {
+                            sender.send(Command::Disconnect(_forceful)).await.unwrap()
                         }
                         _ => {}
                     }
                 }
-                Err(err) => {
+                Err(e) => {
                     /* connection failed */
                     break;
                 }
@@ -47,11 +65,23 @@ async fn main() {
     }
 }
 
-async fn connect(conf: &ServerConf) -> Result<()> {
-    match client::init(&conf).await {
+fn grant_rw_acl(path: &str, user: &str) -> io::Result<()> {
+    let status = process::Command::new("setfacl")
+        .args(["-m", &format!("u:{}:rw", user), path])
+        .status()?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            "setfacl command failed",
+        ))
+    }
+}
+async fn connect(conf: &ServerConf, controller: Receiver<Command>) {
+    match client::init(&conf, controller).await {
         Ok(_) => info!("System shut down without error"),
         Err(e) => error!("System exited with {e:?}"),
     }
-
-    Ok(())
 }

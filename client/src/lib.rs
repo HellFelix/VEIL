@@ -1,12 +1,9 @@
+use commands::Command;
 use log::*;
 use pnet::packet::ipv4::Ipv4Packet;
+use tokio::{net::UnixStream, sync::mpsc::Receiver};
 
-use std::{
-    io,
-
-    net::IpAddr,
-    sync::mpsc::{Receiver, TryRecvError},
-};
+use std::{io, net::IpAddr};
 
 use vpn_core::{logs::init_logger, Result};
 
@@ -21,10 +18,10 @@ pub struct ServerConf {
     pub port: u16,
 }
 
-pub async fn init(conf: &ServerConf) -> Result<()> {
+pub async fn init(conf: &ServerConf, controller: Receiver<Command<'static>>) -> Result<()> {
     //init_logger("client", "info", false);
     let client = Client::try_setup(3, &conf).await?;
-    client.run().await;
+    client.run(controller).await;
     info!("Up and running!");
     Ok(())
 }

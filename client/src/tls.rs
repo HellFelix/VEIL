@@ -2,10 +2,7 @@ use std::{
     io::{Read, Write},
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     str::FromStr,
-    sync::{
-        mpsc::{channel, Receiver, TryRecvError},
-        Arc,
-    },
+    sync::Arc,
     thread::sleep,
     time::Duration,
 };
@@ -16,12 +13,16 @@ use rustls::{pki_types::ServerName, version::TLS13, ClientConfig, ClientConnecti
 
 use tokio::{
     io::{split, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf},
-    net::TcpStream,
+    net::{TcpStream, UnixStream},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Mutex,
+    },
 };
 use tokio_rustls::{client::TlsStream, Connect, TlsAcceptor, TlsConnector};
 use vpn_core::{
     network::{
-        dhc::{Handshake, SessionID},
+        dhc::{DeAuthStage, Handshake, SessionID},
         SERVER_ADDR,
     },
     system::{setup, TunInterface, MTU_SIZE},
@@ -29,7 +30,7 @@ use vpn_core::{
     Error, ErrorKind, Result,
 };
 
-use crate::ServerConf;
+use crate::{commands::Command, ServerConf};
 
 pub type SecureStream = TlsStream<TcpStream>;
 pub type SecureRead = ReadHalf<SecureStream>;
@@ -171,29 +172,39 @@ pub struct Client {
     interface: TunInterface,
 }
 impl Client {
-    // pub fn run_traffic(&mut self) -> Result<()> {
-
-    //     }
-    //     Ok(())
-    // }
-
-    pub async fn run(self) {
-        let (reader, writer) = split(self.stream);
-        let interface_clone = self.interface.clone();
+    pub async fn run(self, controller: Receiver<Command<'static>>) {
+        let (sender, receiver) = channel(100);
+        let (tls_reader, tls_writer) = split(self.stream);
+        let interface = self.interface.clone();
 
         let write_handle = tokio::spawn(async move {
-            Self::handle_write(writer, self.interface).await.unwrap();
+            Self::handle_write(tls_writer, receiver).await.unwrap();
         });
-        let read_handle = tokio::spawn(async move {
-            Self::handle_read(reader, interface_clone).await.unwrap();
+        let remote_handle = tokio::spawn(async move {
+            Self::handle_remote_read(tls_reader, interface)
+                .await
+                .unwrap();
             info!("Finished reader");
         });
+        let sender_clone = sender.clone();
+        let tun_handle = tokio::spawn(async move {
+            Self::handle_tun_read(sender_clone, self.interface)
+                .await
+                .unwrap();
+        });
 
-        let (_write_res, _read_res) = tokio::join!(write_handle, read_handle);
-        _read_res.unwrap();
+        let controller = Arc::new(Mutex::new(controller));
+        let unix_handle = tokio::spawn(async move {
+            Self::handle_unix_read(sender, controller, self.session_id)
+                .await
+                .unwrap();
+        });
+
+        let (_write_res, _read_res, _tun_res, _unix_res) =
+            tokio::join!(write_handle, remote_handle, tun_handle, unix_handle);
     }
 
-    async fn handle_read(mut reader: SecureRead, interface: TunInterface) -> Result<()> {
+    async fn handle_remote_read(mut reader: SecureRead, interface: TunInterface) -> Result<()> {
         info!("Reader running");
         let mut res_buf = [0; MTU_SIZE];
         loop {
@@ -209,8 +220,7 @@ impl Client {
         }
     }
 
-    async fn handle_write(mut writer: SecureWrite, interface: TunInterface) -> Result<()> {
-        info!("Writer running");
+    async fn handle_tun_read(sender: Sender<Vec<u8>>, interface: TunInterface) -> Result<()> {
         let mut req_buf = [0; MTU_SIZE];
         loop {
             // TODO: Fix this weird "future is not `Send`" issue
@@ -220,11 +230,43 @@ impl Client {
                     size = s as usize;
                 }
                 if size > 0 {
-                    writer.write_all(&req_buf[4..size]).await?;
-                    info!("Forwarding {:?}", &req_buf[..size as usize]);
+                    sender.send(req_buf[4..size].to_owned()).await.unwrap();
                 }
             }
         }
+    }
+
+    async fn handle_unix_read(
+        sender: Sender<Vec<u8>>,
+        controller: Arc<Mutex<Receiver<Command<'_>>>>,
+        session_id: SessionID,
+    ) -> Result<()> {
+        let mut controller_lock = controller.lock().await;
+        while let Some(cmd) = controller_lock.recv().await {
+            match cmd {
+                Command::Disconnect(forceful) => {
+                    if forceful {
+                        panic!("Forced shutdown");
+                    } else {
+                        sender
+                            .send(DeAuthStage::Disconnect(session_id).to_bytes().unwrap())
+                            .await
+                            .unwrap();
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_write(mut writer: SecureWrite, mut receiver: Receiver<Vec<u8>>) -> Result<()> {
+        info!("Writer running");
+        while let Some(msg) = receiver.recv().await {
+            writer.write_all(&msg).await?;
+            info!("Forwarding {:?}", &msg);
+        }
+        Ok(())
     }
 
     pub async fn try_setup(mut retries: u8, server_config: &ServerConf) -> Result<Self> {

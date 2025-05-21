@@ -12,14 +12,14 @@ use crate::{Error, ErrorKind, Result};
 pub type SessionID = u32;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
-pub enum Stage {
+pub enum AuthStage {
     Discover,
     Offer,
     Request,
     Acknowledge,
     Reject,
 }
-impl Stage {
+impl AuthStage {
     pub fn next_stage(self) -> Result<Self> {
         match self {
             Self::Discover => Ok(Self::Offer),
@@ -43,7 +43,7 @@ pub struct Handshake {
     address: Option<Ipv4Addr>,
     checksum: u32,
     session_id: SessionID,
-    stage: Stage,
+    stage: AuthStage,
 }
 impl Handshake {
     /// Creates a message at the Discover stage with a new session id
@@ -52,7 +52,7 @@ impl Handshake {
             address: None,
             checksum: 0,
             session_id: rand::rng().random(),
-            stage: Stage::Discover,
+            stage: AuthStage::Discover,
         };
         res.set_checksum();
 
@@ -64,7 +64,7 @@ impl Handshake {
             address: Some(client_source_address),
             checksum: 0,
             session_id: 0,
-            stage: Stage::Reject,
+            stage: AuthStage::Reject,
         };
         res.set_checksum();
 
@@ -77,7 +77,7 @@ impl Handshake {
             address: Some(client_source_address),
             checksum: 0,
             session_id,
-            stage: Stage::Reject,
+            stage: AuthStage::Reject,
         };
         res.set_checksum();
 
@@ -85,7 +85,7 @@ impl Handshake {
     }
 
     pub fn is_rejection(&self) -> bool {
-        self.stage == Stage::Reject
+        self.stage == AuthStage::Reject
     }
 
     /// Consumes the current handshake state and
@@ -118,8 +118,8 @@ impl Handshake {
 
     pub fn validate(&self, expected: Option<Self>) -> Result<()> {
         if match self.stage {
-            Stage::Discover => self.validate_discovery(Self::discovery_validator()),
-            Stage::Offer => self.validate_offer(unwrap_handshake(expected)?),
+            AuthStage::Discover => self.validate_discovery(Self::discovery_validator()),
+            AuthStage::Offer => self.validate_offer(unwrap_handshake(expected)?),
             _ => *self == unwrap_handshake(expected)?,
         } {
             Ok(())
@@ -138,7 +138,7 @@ impl Handshake {
             address: None,
             checksum: 0,
             session_id: 0,
-            stage: Stage::Discover,
+            stage: AuthStage::Discover,
         }
     }
 
@@ -281,5 +281,21 @@ impl AddrPool {
     pub fn release(&mut self, addr: Ipv4Addr) -> Result<()> {
         self.0[addr.octets()[3] as usize - 1].unclaim()?;
         Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+pub enum DeAuthStage {
+    Disconnect(u32),
+    Acknowledge(u32),
+    Rejection,
+}
+impl DeAuthStage {
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        bincode::deserialize(bytes).ok()
+    }
+
+    pub fn to_bytes(self) -> Option<Vec<u8>> {
+        bincode::serialize(&self).ok()
     }
 }

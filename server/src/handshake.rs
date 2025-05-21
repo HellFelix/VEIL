@@ -25,18 +25,24 @@ pub async fn try_assign_address(
             Err(e) => {
                 warn!("Rejecting discovery from {client_socket} due to protocol violation: {e}");
                 stream
-                    .write_all(&mut Handshake::discovery_rejection(*client_socket.ip()).to_bytes());
+                    .write_all(&mut Handshake::discovery_rejection(*client_socket.ip()).to_bytes())
+                    .await
+                    .ok()?;
                 return None;
             }
         };
-    match offeer_addr_protocol(discovery, session_id, addr_pool, stream).await {
+    match offer_addr_protocol(discovery, session_id, addr_pool, stream).await {
         Ok(addr) => Some((addr, session_id)),
         Err(e) => {
             warn!("Handshake with client on session {session_id:#x} failed due to protocol violation: {e}");
-            stream.write_all(
-                &mut Handshake::in_session_rejection(*client_socket.ip(), session_id).to_bytes(),
-            );
-            None
+            stream
+                .write_all(
+                    &mut Handshake::in_session_rejection(*client_socket.ip(), session_id)
+                        .to_bytes(),
+                )
+                .await
+                .ok()?;
+            return None;
         }
     }
 }
@@ -58,7 +64,7 @@ async fn accept_discovery(
     Ok((discovery, session_id))
 }
 
-async fn offeer_addr_protocol(
+async fn offer_addr_protocol(
     discovery: Handshake,
     session_id: SessionID,
     addr_pool: &mut AddrPool,

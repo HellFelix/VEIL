@@ -1,5 +1,4 @@
 use pnet::packet::{
-    icmp::IcmpPacket,
     ip::{IpNextHeaderProtocol, IpNextHeaderProtocols},
     ipv4::Ipv4Packet,
     tcp::TcpPacket,
@@ -20,15 +19,15 @@ use std::{
 use vpn_core::{
     logs::init_logger,
     network::{
-        dhc::{self},
+        dhc::{self, DeAuthStage, SessionID},
         SERVER_ADDR,
     },
     system::MTU_SIZE,
-    Error, ErrorKind, Result,
+    Result,
 };
 
 use tokio::{
-    io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
+    io::{split, AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{
         mpsc::{channel, Receiver, Sender},
@@ -42,8 +41,8 @@ mod echo;
 mod encryption;
 mod forwarding;
 use forwarding::{
-    Connection, IcmpConnection, RawIcmpSock, RawSock, RawTcpSock, RawUdpSock, SockStateType,
-    StatefulSock, StatelessSock, TcpConnection, UdpConnection,
+    Connection, IcmpConnection, RawSock, RawTcpSock, RawUdpSock, SockStateType, StatefulSock,
+    TcpConnection, UdpConnection,
 };
 mod handshake;
 
@@ -104,15 +103,16 @@ async fn run_server() -> Result<()> {
             let mut session_registry_lock = session_registry_ref.lock().await;
 
             let mut stream = acceptor.accept(stream).await?;
-            handshake::try_assign_address(
+            let (_addr, session_id) = handshake::try_assign_address(
                 &mut addr_pool_lock,
                 &mut session_registry_lock,
                 &mut stream,
                 client_addr,
             )
-            .await;
+            .await
+            .unwrap();
             let fut = async move {
-                handle_client(stream).await?;
+                handle_client(stream, session_id).await?;
 
                 Ok(()) as Result<()>
             };
@@ -132,7 +132,7 @@ struct ClientConn {
     pub in_link_handle: JoinHandle<()>,
 }
 
-async fn handle_client(stream: SecureStream) -> Result<()> {
+async fn handle_client(stream: SecureStream, session_id: SessionID) -> Result<()> {
     let conns: Arc<RwLock<HashMap<ConnIdent, ClientConn>>> = Arc::new(RwLock::new(HashMap::new()));
 
     let (mut tls_reader, mut tls_writer) = split(stream);
@@ -144,6 +144,22 @@ async fn handle_client(stream: SecureStream) -> Result<()> {
         loop {
             let size = tls_reader.read(&mut buf).await.unwrap();
             info!("Got packet from TLS");
+            if let Some(stage) = DeAuthStage::from_bytes(&buf[..size]) {
+                let death_advance = match stage {
+                    DeAuthStage::Disconnect(id) => {
+                        if session_id == id {
+                            DeAuthStage::Acknowledge(session_id)
+                        } else {
+                            DeAuthStage::Rejection
+                        }
+                    }
+                    _ => DeAuthStage::Rejection,
+                };
+                in_sender
+                    .send(death_advance.to_bytes().unwrap())
+                    .await
+                    .unwrap();
+            }
             let (conn_ident, protocol, packet) = process_packet(&buf[..size]).unwrap();
 
             let mut conns_lock = conns.write().await;
