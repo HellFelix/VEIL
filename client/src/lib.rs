@@ -18,7 +18,7 @@ pub struct ServerConf {
     pub port: u16,
 }
 
-pub async fn init(conf: &ServerConf, controller: Receiver<Command<'static>>) -> Result<()> {
+pub async fn init(conf: &ServerConf, controller: Receiver<Command>) -> Result<()> {
     //init_logger("client", "info", false);
     let client = Client::try_setup(3, &conf).await?;
     client.run(controller).await;

@@ -6,7 +6,6 @@ use std::{
     str::FromStr,
 };
 
-use bincode::config;
 use client::commands::*;
 
 fn main() {
@@ -72,7 +71,6 @@ fn parse_connect(mut args: Args) -> io::Result<ServerAddr> {
                     .parse::<u16>()
                     .expect("Parsing failed"),
             )),
-
             "-n" => Ok(ServerAddr::Configured(args.next().ok_or(Error::new(
                 ErrorKind::InvalidInput,
                 format!("Missing server name"),
@@ -298,8 +296,7 @@ fn send_to_service(cmd: Command) {
     let mut stream = UnixStream::connect("/tmp/veil.sock")
         .expect("Failed to connect to unix socket. Is client service running?");
 
-    let config = config::standard();
-    let encoded: Vec<u8> = bincode::encode_to_vec(&cmd, config).unwrap();
+    let encoded: Vec<u8> = bincode::serialize(&cmd).unwrap();
     println!("{cmd:?}");
 
     stream

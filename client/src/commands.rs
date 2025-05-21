@@ -4,8 +4,8 @@ use bincode;
 use log::Level;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub enum Command<'a> {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Command {
     /// Connect to server at provided address
     /// `veil connect -o {address} {port}`
     /// `veil connect --override {address} {port}`
@@ -16,8 +16,7 @@ pub enum Command<'a> {
     ///
     /// Connect to server with address specified in veil.conf
     /// `veil connect`
-    #[serde(borrow)]
-    Connect(ServerAddr<'a>),
+    Connect(ServerAddr),
     /// Disconnect form current server
     /// Graceful disconnect - waits for server acknowledgement
     /// `veil disconnect`
@@ -50,7 +49,7 @@ pub enum Command<'a> {
     ///
     /// `veil config route unset -h {address}`
     /// `veil config route unset --host {address}`
-    Config(ConfigRule<'a>),
+    Config(ConfigRule),
 
     /// Display usage
     /// `veil`
@@ -63,24 +62,24 @@ pub enum Command<'a> {
     Version,
 }
 
-impl<'a> Command<'a> {
+impl Command {
     pub fn to_bytes(&self) -> Vec<u8> {
         bincode::serialize(self).unwrap()
     }
 
-    pub fn from_bytes<'b: 'a>(input: &'b [u8]) -> Self {
+    pub fn from_bytes(input: &[u8]) -> Self {
         bincode::deserialize(input).unwrap()
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub enum ServerAddr<'a> {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum ServerAddr {
     Default,
-    Configured(&'a str),
+    Configured(String),
     Override(IpAddr, u16),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum LogLevel {
     Error,
     Warn,
@@ -89,39 +88,38 @@ pub enum LogLevel {
     Trace,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Log {
     Show,
     Get,
     Set(LogLevel),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub enum ConfigRule<'a> {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum ConfigRule {
     Route(RouteOpt, RoutingRule),
-    #[serde(borrow)]
-    Server(ServerOpt<'a>),
+    Server(ServerOpt),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub enum ServerOpt<'a> {
-    Add(&'a str, IpAddr),
-    Remove(&'a str),
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum ServerOpt {
+    Add(String, IpAddr),
+    Remove(String),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum RouteOpt {
     Set,
     Unset,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum RoutingRule {
     Host(IpAddr, Permission),
     All(Permission),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Permission {
     Allow,
     Block,

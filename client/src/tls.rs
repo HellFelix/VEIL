@@ -144,7 +144,7 @@ pub struct Client {
     interface: TunInterface,
 }
 impl Client {
-    pub async fn run(self, controller: broadcast::Receiver<Command<'static>>) {
+    pub async fn run(self, controller: broadcast::Receiver<Command>) {
         let (sender, receiver) = channel(100);
         let (tls_reader, tls_writer) = split(self.stream);
         let interface = self.interface.clone();
@@ -210,7 +210,7 @@ impl Client {
 
     async fn handle_unix_read(
         sender: Sender<Vec<u8>>,
-        controller: Arc<Mutex<broadcast::Receiver<Command<'_>>>>,
+        controller: Arc<Mutex<broadcast::Receiver<Command>>>,
         session_id: SessionID,
     ) -> Result<()> {
         let mut controller_lock = controller.lock().await;

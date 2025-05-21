@@ -84,7 +84,7 @@ fn grant_rw_acl(path: &str, user: &str) -> io::Result<()> {
         ))
     }
 }
-async fn connect(conf: &ServerConf, controller: Receiver<Command<'static>>) {
+async fn connect(conf: &ServerConf, controller: Receiver<Command>) {
     match client::init(&conf, controller).await {
         Ok(_) => info!("System shut down without error"),
         Err(e) => error!("System exited with {e:?}"),
