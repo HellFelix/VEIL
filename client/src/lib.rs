@@ -12,7 +12,7 @@ pub mod commands;
 mod tls;
 use tls::{Client, SecureStream};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct ServerConf {
     pub address: IpAddr,
     pub port: u16,

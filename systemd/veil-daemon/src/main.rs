@@ -18,6 +18,8 @@ async fn main() {
     let mut exec_args = args().skip(1);
     vpn_core::logs::init_logger("daemon", "info", false);
     let listener = UnixListener::bind("/tmp/veil.sock").unwrap();
+
+    #[cfg(target_os = "linux")]
     grant_rw_acl("/tmp/veil.sock", &exec_args.next().unwrap()).unwrap();
 
     let conf = extract_conf().unwrap();
@@ -28,31 +30,31 @@ async fn main() {
         for stream in listener.incoming() {
             match stream {
                 Ok(mut stream) => {
-                    let mut buf = Vec::new();
-                    stream.read_to_end(&mut buf).unwrap();
+                    let mut buf = [0; 50];
 
-                    info!("{buf:?}");
+                    let size = stream.read(&mut buf).unwrap();
+                    info!("{:?}", &buf[..size]);
 
-                    let cmd = Command::from_bytes(&buf[..]);
+                    let cmd = Command::from_bytes(&buf[..size]);
 
                     match cmd {
                         Command::Connect(server) => match server {
                             ServerAddr::Default => {
                                 connect(
-                                    conf.servers.get(&String::from("main")).unwrap(),
+                                    *conf.servers.get(&String::from("main")).unwrap(),
                                     sender.subscribe(),
                                 )
                                 .await
                             }
                             ServerAddr::Configured(name) => {
                                 connect(
-                                    conf.servers.get(&name.to_owned()).unwrap(),
+                                    *conf.servers.get(&name.to_owned()).unwrap(),
                                     sender.subscribe(),
                                 )
                                 .await
                             }
                             ServerAddr::Override(address, port) => {
-                                connect(&ServerConf { address, port }, sender.subscribe()).await
+                                connect(ServerConf { address, port }, sender.subscribe()).await
                             }
                         },
                         Command::Disconnect(_forceful) => {
@@ -84,9 +86,11 @@ fn grant_rw_acl(path: &str, user: &str) -> io::Result<()> {
         ))
     }
 }
-async fn connect(conf: &ServerConf, controller: Receiver<Command>) {
-    match client::init(&conf, controller).await {
-        Ok(_) => info!("System shut down without error"),
-        Err(e) => error!("System exited with {e:?}"),
-    }
+async fn connect(conf: ServerConf, controller: Receiver<Command>) {
+    tokio::spawn(async move {
+        match client::init(&conf, controller).await {
+            Ok(_) => info!("System shut down without error"),
+            Err(e) => error!("System exited with {e:?}"),
+        }
+    });
 }

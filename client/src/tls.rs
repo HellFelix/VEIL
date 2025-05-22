@@ -165,7 +165,6 @@ impl Client {
                 .unwrap();
         });
 
-        let controller = Arc::new(Mutex::new(controller));
         let unix_handle = tokio::spawn(async move {
             Self::handle_unix_read(sender, controller, self.session_id)
                 .await
@@ -210,13 +209,15 @@ impl Client {
 
     async fn handle_unix_read(
         sender: Sender<Vec<u8>>,
-        controller: Arc<Mutex<broadcast::Receiver<Command>>>,
+        mut controller: broadcast::Receiver<Command>,
         session_id: SessionID,
     ) -> Result<()> {
-        let mut controller_lock = controller.lock().await;
-        while let Ok(cmd) = controller_lock.recv().await {
+        println!("Listening for commands");
+        while let Ok(cmd) = controller.recv().await {
+            info!("Got command");
             match cmd {
                 Command::Disconnect(forceful) => {
+                    info!("Got disconnect request");
                     if forceful {
                         panic!("Forced shutdown");
                     } else {
