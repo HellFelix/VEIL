@@ -33,9 +33,9 @@ async fn main() {
 
                     info!("{buf:?}");
 
-                    let (command, _len): (Command, usize) = bincode::deserialize(&buf[..]).unwrap();
+                    let cmd = Command::from_bytes(&buf[..]);
 
-                    match command {
+                    match cmd {
                         Command::Connect(server) => match server {
                             ServerAddr::Default => {
                                 connect(

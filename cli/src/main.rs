@@ -296,8 +296,9 @@ fn send_to_service(cmd: Command) {
     let mut stream = UnixStream::connect("/tmp/veil.sock")
         .expect("Failed to connect to unix socket. Is client service running?");
 
-    let encoded: Vec<u8> = bincode::serialize(&cmd).unwrap();
+    let encoded: Vec<u8> = cmd.to_bytes();
     println!("{cmd:?}");
+    println!("{encoded:?}");
 
     stream
         .write_all(&encoded)

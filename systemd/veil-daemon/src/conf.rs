@@ -33,7 +33,7 @@ pub struct RouteConf {
 }
 
 pub fn extract_conf() -> Result<ClientConf, Box<dyn Error>> {
-    let config_str = fs::read_to_string("/etc/systemd/veil/veil.conf")?;
+    let config_str = fs::read_to_string("/etc/veil/veil.conf")?;
     parse_conf(&config_str)
 }
 

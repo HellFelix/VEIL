@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Optional: point to your actual tool or backend handler
-VEIL_CLI="~/dev/rust/veil/cli/target/debug/cli"
+VEIL_CLI="$HOME/dev/rust/veil/cli/target/debug/cli"
 
 journalctl -fu veil.service --no-pager --since=now &
 LOG_PID=$!
