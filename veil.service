@@ -1,5 +1,5 @@
 [Unit]
-Description=My VPN Client Daemon
+Description=VEIL Client Service
 After=network-online.target
 Wants=network-online.target
 

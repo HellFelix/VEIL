@@ -5,4 +5,4 @@ logs/
 certs/
 .DS_Store
 .tokeignore
-systemd/veil.conf
+veil.conf
