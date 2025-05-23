@@ -1,11 +1,11 @@
 [package]
-name = "veil-daemon"
+name = "client-service"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-client = { path = "../../client" }
-vpn-core = { path = "../../vpn-core/" }
+client = { path = "../client" }
+vpn-core = { path = "../vpn-core/" }
 log = "0.4.27"
 pest = "2.8.0"
 pest_derive = "2.8.0"

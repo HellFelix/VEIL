@@ -8,7 +8,7 @@ use client::commands::*;
 use client::{self, ServerConf};
 
 mod conf;
-use conf::{ClientConf, extract_conf};
+use conf::{ClientConf, add_server, extract_conf};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{Receiver, channel};
 use vpn_core::Result;
@@ -60,6 +60,17 @@ async fn main() {
                         Command::Disconnect(_forceful) => {
                             sender.send(Command::Disconnect(_forceful)).unwrap();
                         }
+                        Command::Config(rule) => match rule {
+                            ConfigRule::Server(opt) => match opt {
+                                ServerOpt::Add(name, addr, port) => {
+                                    if let Err(e) = add_server(&name, addr, port) {
+                                        error!("Failed to add server config {e}");
+                                    }
+                                }
+                                ServerOpt::Remove(name) => {}
+                            },
+                            ConfigRule::Route(opt, route_rule) => {}
+                        },
                         _ => {}
                     }
                 }

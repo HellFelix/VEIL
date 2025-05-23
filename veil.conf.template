@@ -1,8 +1,15 @@
-server {
-  address = xxx.xxx.xxx.xxx
-  # ipv = 6
-  ipv = 4
-  port = 1234
+servers {
+  main {
+    address = xxx.xxx.xxx.xxx
+    ipv = 4
+    port = 1234
+  }
+
+  ipv6-srv {
+    address = hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh:hhhh
+    ipv = 6
+    port = 1234
+  }
 }
 
 route {

@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/bin/veil-daemon hellfelix
+ExecStart=/bin/veil-client-service __USERNAME__
 ExecStopPost=rm /tmp/veil.sock
 Restart=no
 User=root

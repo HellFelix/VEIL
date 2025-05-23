@@ -39,7 +39,7 @@ pub enum Command {
     /// Change config rules
     /// This can also be changed manually by writing them to veil.conf
     ///
-    /// `veil config server add {name} {address}`
+    /// `veil config server add {name} {address} {port}`
     /// `veil config server remove {name}`
     ///
     /// `veil config route set -a block`
@@ -103,7 +103,7 @@ pub enum ConfigRule {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ServerOpt {
-    Add(String, IpAddr),
+    Add(String, IpAddr, u16),
     Remove(String),
 }
 

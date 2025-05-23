@@ -98,14 +98,14 @@ fn parse_connect(mut args: Args) -> io::Result<ServerAddr> {
     }
 }
 fn get_addr(addr: String) -> io::Result<IpAddr> {
-    if let Ok(res) = Ipv4Addr::from_str(&addr) {
+    if let Ok(res) = addr.parse() {
         return Ok(IpAddr::V4(res));
-    } else if let Ok(res) = Ipv6Addr::from_str(&addr) {
+    } else if let Ok(res) = addr.parse() {
         return Ok(IpAddr::V6(res));
     } else {
         return Err(Error::new(
             ErrorKind::InvalidInput,
-            format!("Address does not match ipv4 or ipv6 format"),
+            format!("Address does not match ipv4 or ipv6 format '{addr}'"),
         ));
     }
 }
@@ -210,8 +210,12 @@ fn parse_server_conf(mut args: Args) -> io::Result<ServerOpt> {
                 ))?,
                 get_addr(args.next().ok_or(Error::new(
                     ErrorKind::InvalidInput,
-                    format!("Missing server name"),
+                    format!("Missing server address"),
                 ))?)?,
+                args.next()
+                    .ok_or(Error::new(ErrorKind::InvalidInput, "Missing server port"))?
+                    .parse::<u16>()
+                    .expect("Failed to parse server port"),
             )),
             "remove" => Ok(ServerOpt::Remove(args.next().ok_or(Error::new(
                 ErrorKind::InvalidInput,

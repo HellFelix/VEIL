@@ -185,3 +185,45 @@ fn parse_conf(input: &str) -> Result<ClientConf, Box<dyn Error>> {
         },
     })
 }
+
+pub fn add_server(name: &str, address: IpAddr, port: u16) -> io::Result<()> {
+    let ipv = if let IpAddr::V4(_) = address { 4 } else { 6 };
+    let server_conf = format!(
+        "\n  {name} {{\n    address = {address}\n    ipv = {ipv}\n    port = {port}\n  }}\n"
+    );
+
+    let current_conf = fs::read_to_string("/etc/veil/veil.conf")?;
+    let lines = current_conf.lines();
+
+    let mut servers_start_index = None;
+    let mut servers_end_index = None;
+    let mut open_braces = 0;
+    for (i, line) in lines.clone().enumerate() {
+        if line.starts_with("servers") && line.ends_with("{") {
+            servers_start_index = Some(i);
+        } else if line.ends_with("{") {
+            open_braces += 1;
+        } else if line.ends_with("}") {
+            if open_braces == 0 {
+                if let Some(_) = servers_start_index {
+                    servers_end_index = Some(i);
+                    break;
+                }
+            } else {
+                open_braces -= 1;
+            }
+        }
+    }
+    if let Some(end_index) = servers_end_index {
+        let mut lines_vec: Vec<&str> = lines.collect();
+        lines_vec.insert(end_index, &server_conf);
+        let updated_config = lines_vec.join("\n");
+
+        fs::write("/etc/veil/veil.conf", updated_config)
+    } else {
+        Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "Failed to parse existing config",
+        ))
+    }
+}
