@@ -188,6 +188,7 @@ fn parse_config(mut args: Args) -> io::Result<ConfigRule> {
                 ))?)?,
                 parse_route_rule(args)?,
             )),
+            "reload" => Ok(ConfigRule::Reload),
             a => Err(Error::new(
                 ErrorKind::InvalidInput,
                 format!("Invalid config target '{a}'"),

@@ -22,7 +22,7 @@ async fn main() {
     #[cfg(target_os = "linux")]
     grant_rw_acl("/tmp/veil.sock", &exec_args.next().unwrap()).unwrap();
 
-    let conf = extract_conf().unwrap();
+    let mut conf = extract_conf().unwrap();
 
     // accept connections and process them, spawning a new thread for each one
     loop {
@@ -70,6 +70,9 @@ async fn main() {
                                 ServerOpt::Remove(name) => {}
                             },
                             ConfigRule::Route(opt, route_rule) => {}
+                            ConfigRule::Reload => {
+                                conf = extract_conf().unwrap();
+                            }
                         },
                         _ => {}
                     }

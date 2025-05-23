@@ -99,6 +99,7 @@ pub enum Log {
 pub enum ConfigRule {
     Route(RouteOpt, RoutingRule),
     Server(ServerOpt),
+    Reload,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
