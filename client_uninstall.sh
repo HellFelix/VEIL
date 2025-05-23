@@ -1,5 +1,4 @@
-$CONFIRMED=1
-while [[ ! $CONFIRMED ]]; do
+while true; do
   read -rp "Are you sure you want to uninstall? Configuration and certificates will be removed (Y/n)" uninstall
   
   if [[ "$uninstall" == "Y" || "$uninstall" == "yes" ]]; then
