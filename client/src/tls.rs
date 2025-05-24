@@ -160,13 +160,11 @@ impl Client {
         });
         let sender_clone = sender.clone();
         let tun_handle = tokio::spawn(async move {
-            Self::handle_tun_read(sender_clone, self.interface)
-                .await
-                .unwrap();
+            Self::handle_tun_read(sender, self.interface).await.unwrap();
         });
 
         let unix_handle = tokio::spawn(async move {
-            Self::handle_unix_read(sender, controller, self.session_id)
+            Self::handle_unix_read(sender_clone, controller, self.session_id)
                 .await
                 .unwrap();
         });
@@ -179,12 +177,21 @@ impl Client {
         info!("Reader running");
         let mut res_buf = [0; MTU_SIZE];
         loop {
-            info!("Reading");
+            info!("Reading remote");
             if let Ok(len) = reader.read(&mut res_buf[4..]).await {
-                info!("Found length {len}");
-                res_buf[3] = 2;
-                info!("Got {:?}", &res_buf[..len + 4]);
-                interface.write(&mut res_buf[..4 + len])?;
+                if let Some(deauth) = DeAuthStage::from_bytes(&res_buf[4..len + 4]) {
+                    match deauth {
+                        DeAuthStage::Acknowledge(session_id) => {
+                            panic!("Shut down");
+                        }
+                        _ => {}
+                    }
+                } else {
+                    info!("Found length {len}");
+                    res_buf[3] = 2;
+                    info!("Got {:?}", &res_buf[..len + 4]);
+                    interface.write(&mut res_buf[..4 + len])?;
+                }
             } else {
                 continue;
             }
@@ -194,15 +201,20 @@ impl Client {
     async fn handle_tun_read(sender: Sender<Vec<u8>>, interface: TunInterface) -> Result<()> {
         let mut req_buf = [0; MTU_SIZE];
         loop {
-            // TODO: Fix this weird "future is not `Send`" issue
+            info!("Reading TUN");
+            // TODO: Implement AsyncRead for interface so that read can be performed without
+            // calling yield_now.
             let mut size = 0;
             while size == 0 {
                 if let Some(s) = interface.read(&mut req_buf)? {
                     size = s as usize;
                 }
+
                 if size > 0 {
+                    info!("Forwarding, {:?}", &req_buf[4..size]);
                     sender.send(req_buf[4..size].to_owned()).await.unwrap();
                 }
+                tokio::task::yield_now().await;
             }
         }
     }
