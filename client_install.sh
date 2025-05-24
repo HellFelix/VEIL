@@ -3,7 +3,10 @@
 OS="$(uname)"
 USERNAME="${SUDO_USER:-$(whoami)}"
 
-echo "Installing as user: $REAL_USER"
+USERID="$(id -u $USERNAME)"
+GROUPID="$(id -g $USERNAME)"
+
+echo "Installing as user: $USERNAME with uid=$USERID, gid=$GROUPID"
 
 if [[ "$OS" == "Darwin" ]]; then
     echo "Running on macOS"
@@ -11,7 +14,7 @@ elif [[ "$OS" == "Linux" ]]; then
     echo "Installing for linux system..."
 
     echo "Setting up systemd service..."
-    sed "s/__USERNAME__/$USERNAME/" veil.service.template > /etc/systemd/system/veil.service
+    sed "s/__ID__/$USERID $GROUPID/" veil.service.template > /etc/systemd/system/veil.service
     cp ./client-service/target/debug/client-service /bin/veil-client-service
     
     echo "Creating veil environment"

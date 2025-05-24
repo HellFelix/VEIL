@@ -1,7 +1,9 @@
 use std::env::args;
+use std::ffi::CString;
 use std::{io, process};
 use std::{io::Read, net::IpAddr, os::unix::net::UnixListener};
 
+use libc::chown;
 use log::*;
 
 use client::commands::*;
@@ -20,7 +22,12 @@ async fn main() {
     let listener = UnixListener::bind("/tmp/veil.sock").unwrap();
 
     #[cfg(target_os = "linux")]
-    grant_rw_acl("/tmp/veil.sock", &exec_args.next().unwrap()).unwrap();
+    change_sock_ownership(
+        "/tmp/veil.sock",
+        exec_args.next().unwrap().parse().unwrap(),
+        exec_args.next().unwrap().parse().unwrap(),
+    )
+    .unwrap();
 
     let mut conf = extract_conf().unwrap();
 
@@ -86,18 +93,14 @@ async fn main() {
     }
 }
 
-fn grant_rw_acl(path: &str, user: &str) -> io::Result<()> {
-    let status = process::Command::new("setfacl")
-        .args(["-m", &format!("u:{}:rw", user), path])
-        .status()?;
+fn change_sock_ownership(path: &str, uid: u32, gid: u32) -> io::Result<()> {
+    let c_path = CString::new(path)?;
+    let result = unsafe { chown(c_path.as_ptr(), uid, gid) };
 
-    if status.success() {
+    if result == 0 {
         Ok(())
     } else {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            "setfacl command failed",
-        ))
+        Err(std::io::Error::last_os_error())
     }
 }
 async fn connect(conf: ServerConf, controller: Receiver<Command>) {
