@@ -41,8 +41,8 @@ mod echo;
 mod encryption;
 mod forwarding;
 use forwarding::{
-    Connection, IcmpConnection, RawSock, RawTcpSock, RawUdpSock, SockStateType, StatefulSock,
-    TcpConnection, UdpConnection,
+    Connection, IcmpConnection, LifeCycle, RawSock, RawTcpSock, RawUdpSock, SockStateType,
+    StatefulSock, TcpConnection, TcpLifeCycle, UdpConnection, UdpLifeCycle,
 };
 mod handshake;
 
@@ -211,7 +211,7 @@ async fn setup_stateful(
     let link_send = in_sender;
     let link_handles = match protocol {
         StatefulProtocol::Tcp => {
-            init_links::<StatefulSock, RawTcpSock, TcpPacket, TcpConnection>(
+            init_links::<StatefulSock, RawTcpSock, TcpPacket, TcpConnection, TcpLifeCycle>(
                 out_receiver,
                 link_send,
                 &packet,
@@ -221,7 +221,7 @@ async fn setup_stateful(
             .await
         }
         StatefulProtocol::Udp => {
-            init_links::<StatefulSock, RawUdpSock, UdpPacket, UdpConnection>(
+            init_links::<StatefulSock, RawUdpSock, UdpPacket, UdpConnection, UdpLifeCycle>(
                 out_receiver,
                 link_send,
                 &packet,
@@ -279,7 +279,7 @@ async fn shutdown_conn(conn_ident: ConnIdent, conns: Arc<RwLock<HashMap<ConnIden
     conns.write().await.remove(&conn_ident);
 }
 
-async fn init_links<T, S, P, C>(
+async fn init_links<T, S, P, C, L>(
     mut out_receiver: Receiver<Vec<u8>>,
     in_sender: Sender<Vec<u8>>,
     packet: &Ipv4Packet<'_>,
@@ -287,12 +287,13 @@ async fn init_links<T, S, P, C>(
     conns: Arc<RwLock<HashMap<ConnIdent, ClientConn>>>,
 ) -> Result<(JoinHandle<()>, JoinHandle<()>)>
 where
-    T: SockStateType,
-    S: RawSock<T>,
+    L: LifeCycle,
+    T: SockStateType<L>,
     P: Packet,
-    C: Connection<T, S, P> + 'static,
+    S: RawSock<T, L>,
+    C: Connection<T, S, P, L> + 'static,
 {
-    let mut conn = create_conn::<T, S, P, C>(packet)?;
+    let mut conn = create_conn::<T, S, P, C, L>(packet)?;
 
     let out_link_handle = tokio::spawn(async move {
         info!("Out-link running");
@@ -357,12 +358,13 @@ fn process_packet(buf: &[u8]) -> Option<(ConnIdent, SupportedProtocol, Ipv4Packe
     return Some((res, protocol, packet));
 }
 
-fn create_conn<T, S, P, C>(packet: &Ipv4Packet) -> Result<C>
+fn create_conn<T, S, P, C, L>(packet: &Ipv4Packet) -> Result<C>
 where
-    T: SockStateType,
-    S: RawSock<T>,
+    L: LifeCycle,
+    T: SockStateType<L>,
+    S: RawSock<T, L>,
     P: Packet,
-    C: Connection<T, S, P>,
+    C: Connection<T, S, P, L>,
 {
     C::create_from_packet(packet)
 }

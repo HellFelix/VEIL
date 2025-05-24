@@ -17,13 +17,13 @@ use crate::SERVER_CONFIG;
 use vpn_core::{system::MTU_SIZE, Error, Result};
 
 mod tcp;
-pub use tcp::{RawTcpSock, TcpConnection};
+pub use tcp::{RawTcpSock, TcpConnection, TcpLifeCycle};
 
 mod icmp;
-pub use icmp::{IcmpConnection, RawIcmpSock};
+pub use icmp::IcmpConnection;
 
 mod udp;
-pub use udp::{RawUdpSock, UdpConnection};
+pub use udp::{RawUdpSock, UdpConnection, UdpLifeCycle};
 
 #[derive(Clone, Copy)]
 pub struct AbstractSock {
@@ -49,12 +49,16 @@ impl AbstractSock {
     }
 }
 
-pub struct SockOpts {
+pub struct SockOpts<L>
+where
+    L: LifeCycle,
+{
     eph_port: Option<u16>,
+    life_cycle: L,
 }
 
-pub trait SockStateType: Clone + Copy + Sized {
-    fn with_opts(abs: AbstractSock, opts: SockOpts) -> Result<Self>;
+pub trait SockStateType<L: LifeCycle>: Clone + Copy + Sized {
+    fn with_opts(abs: AbstractSock, opts: SockOpts<L>) -> Result<Self>;
 
     fn degenerate(&self) -> AbstractSock;
 }
@@ -65,8 +69,8 @@ pub struct StatefulSock {
     eph_port: Option<u16>,
     spoofed_eph_port: u16,
 }
-impl SockStateType for StatefulSock {
-    fn with_opts(abs: AbstractSock, opts: SockOpts) -> Result<Self> {
+impl<L: LifeCycle> SockStateType<L> for StatefulSock {
+    fn with_opts(abs: AbstractSock, opts: SockOpts<L>) -> Result<Self> {
         let spoofed_eph_port = rand::rng().random_range(45000..54000);
 
         Ok(Self {
@@ -81,12 +85,42 @@ impl SockStateType for StatefulSock {
     }
 }
 
+pub trait StatelessLifeCycle: LifeCycle + Sized {
+    fn get_state(&self) -> ConnState {
+        ConnState::Alive
+    }
+    fn check_state<'a>(&mut self, _input: Self::P<'a>) {
+        // Nothing to check because connection is stateless
+    }
+}
+
+#[macro_export]
+macro_rules! implement_stateless_life_cycle {
+    ($name:ident, $packet_type:ident) => {
+        #[derive(Clone, Copy)]
+        pub struct $name;
+        impl LifeCycle for $name {
+            type P<'a> = $packet_type<'a>;
+            fn check_state<'a>(&mut self, _input: Self::P<'a>) {
+                panic!("For stateless connections, check_state should be called from StatelessLifeCycle; not from LifeCycle directly!");
+            }
+            fn get_state(&self) -> super::ConnState {
+                panic!("For stateless connections, get_state should be called from StatelessLifeCycle; not from LifeCycle directly!");
+            }
+            fn initialize() -> Self {
+                Self
+            }
+        }
+        impl StatelessLifeCycle for $name {}
+    };
+}
+
 #[derive(Clone, Copy)]
 pub struct StatelessSock {
     abs: AbstractSock,
 }
-impl SockStateType for StatelessSock {
-    fn with_opts(abs: AbstractSock, opts: SockOpts) -> Result<Self> {
+impl<L: StatelessLifeCycle> SockStateType<L> for StatelessSock {
+    fn with_opts(abs: AbstractSock, opts: SockOpts<L>) -> Result<Self> {
         Ok(Self { abs })
     }
 
@@ -95,13 +129,26 @@ impl SockStateType for StatelessSock {
     }
 }
 
-pub trait RawSock<T: SockStateType>: Clone + Copy + Sized + From<T> {
+#[derive(Clone, Copy)]
+pub enum ConnState {
+    Alive,
+    Finished,
+    Broken,
+}
+pub trait LifeCycle {
+    type P<'a>: Packet;
+    fn initialize() -> Self;
+    fn get_state(&self) -> ConnState;
+    fn check_state<'a>(&mut self, input: Self::P<'a>);
+}
+
+pub trait RawSock<T: SockStateType<L>, L: LifeCycle>: Clone + Copy + Sized + From<T> {
     const IPPROTO: i32;
 
     fn get_abstract(&self) -> T;
 
     //TODO: Do error handling from kernel results
-    fn init(host_addr: Ipv4Addr, opts: SockOpts) -> Result<Self> {
+    fn init(host_addr: Ipv4Addr, opts: SockOpts<L>) -> Result<Self> {
         //TODO: Set the range from the systems available ports
 
         unsafe {
@@ -223,13 +270,13 @@ pub trait RawSock<T: SockStateType>: Clone + Copy + Sized + From<T> {
     ) -> Option<()>;
 }
 
-pub trait Connection<T: SockStateType, S: RawSock<T>, P: Packet>:
-    Send + Sync + Copy + From<AbstractConn<T, S>>
+pub trait Connection<T: SockStateType<L>, S: RawSock<T, L>, P: Packet, L: LifeCycle>:
+    Send + Sync + Copy + From<AbstractConn<T, S, L>>
 {
     fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()>;
     fn recv_from_remote_host(&self) -> Result<Vec<u8>>;
 
-    fn get_conn_opts(packet: &Ipv4Packet) -> Option<SockOpts>;
+    fn get_conn_opts(packet: &Ipv4Packet) -> Option<SockOpts<L>>;
 
     fn create_from_packet(packet: &Ipv4Packet) -> Result<Self> {
         let sock = S::init(
@@ -239,22 +286,24 @@ pub trait Connection<T: SockStateType, S: RawSock<T>, P: Packet>:
 
         Ok(AbstractConn {
             sock,
-            _marker: PhantomData,
             self_addr: SERVER_CONFIG.get_ipv4_addr(),
             peer_addr: packet.get_source(),
             dst_addr: packet.get_destination(),
+            _marker_t: PhantomData,
+            _marker_l: PhantomData,
         }
         .into())
     }
 }
 
 #[derive(Clone, Copy)]
-pub struct AbstractConn<T: SockStateType, S: RawSock<T>> {
+pub struct AbstractConn<T: SockStateType<L>, S: RawSock<T, L>, L: LifeCycle> {
     sock: S,
-    _marker: PhantomData<T>,
     self_addr: Ipv4Addr,
     peer_addr: Ipv4Addr,
     dst_addr: Ipv4Addr,
+    _marker_t: PhantomData<T>,
+    _marker_l: PhantomData<L>,
 }
 
 pub enum ConnectionType {

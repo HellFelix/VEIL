@@ -2,13 +2,15 @@ use libc::IPPROTO_ICMP;
 
 use log::*;
 
-use super::{AbstractConn, Connection, RawSock, SockOpts, StatelessSock};
-use crate::echo;
-use pnet::packet::{
-    icmp::{IcmpPacket, IcmpTypes::EchoRequest},
-    ipv4::Ipv4Packet,
-    Packet,
+use super::{
+    AbstractConn, Connection, LifeCycle, RawSock, SockOpts, StatelessLifeCycle, StatelessSock,
 };
+use crate::implement_stateless_life_cycle;
+
+use pnet::packet::{icmp::IcmpPacket, ipv4::Ipv4Packet};
+
+// Create stateless lifecycle for ICMP Connection
+implement_stateless_life_cycle!(IcmpLifeCycle, IcmpPacket);
 
 #[derive(Clone, Copy)]
 pub struct RawIcmpSock {
@@ -19,7 +21,7 @@ impl From<StatelessSock> for RawIcmpSock {
         Self { abs: value }
     }
 }
-impl RawSock<StatelessSock> for RawIcmpSock {
+impl RawSock<StatelessSock, IcmpLifeCycle> for RawIcmpSock {
     const IPPROTO: i32 = IPPROTO_ICMP;
 
     fn get_abstract(&self) -> StatelessSock {
@@ -46,14 +48,14 @@ impl RawSock<StatelessSock> for RawIcmpSock {
 
 #[derive(Clone, Copy)]
 pub struct IcmpConnection {
-    abs: AbstractConn<StatelessSock, RawIcmpSock>,
+    abs: AbstractConn<StatelessSock, RawIcmpSock, IcmpLifeCycle>,
 }
-impl From<AbstractConn<StatelessSock, RawIcmpSock>> for IcmpConnection {
-    fn from(value: AbstractConn<StatelessSock, RawIcmpSock>) -> Self {
+impl From<AbstractConn<StatelessSock, RawIcmpSock, IcmpLifeCycle>> for IcmpConnection {
+    fn from(value: AbstractConn<StatelessSock, RawIcmpSock, IcmpLifeCycle>) -> Self {
         Self { abs: value }
     }
 }
-impl Connection<StatelessSock, RawIcmpSock, IcmpPacket<'_>> for IcmpConnection {
+impl Connection<StatelessSock, RawIcmpSock, IcmpPacket<'_>, IcmpLifeCycle> for IcmpConnection {
     fn send_to_remote_host(&mut self, packet: &mut [u8]) -> vpn_core::Result<()> {
         self.abs.sock.spoof_send(packet, self.abs.self_addr)
     }
@@ -63,7 +65,10 @@ impl Connection<StatelessSock, RawIcmpSock, IcmpPacket<'_>> for IcmpConnection {
             .spoof_recv(self.abs.peer_addr, self.abs.dst_addr)
     }
 
-    fn get_conn_opts(packet: &Ipv4Packet) -> Option<SockOpts> {
-        Some(SockOpts { eph_port: None })
+    fn get_conn_opts(packet: &Ipv4Packet) -> Option<SockOpts<IcmpLifeCycle>> {
+        Some(SockOpts {
+            eph_port: None,
+            life_cycle: IcmpLifeCycle::initialize(),
+        })
     }
 }

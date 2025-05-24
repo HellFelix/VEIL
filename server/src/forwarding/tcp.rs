@@ -1,4 +1,4 @@
-use std::net::Ipv4Addr;
+use std::{marker::PhantomData, net::Ipv4Addr};
 
 use log::*;
 
@@ -9,10 +9,47 @@ use pnet::packet::{
     tcp::{self, MutableTcpPacket, TcpPacket},
     Packet,
 };
-use tokio::io::split;
 
-use super::{AbstractConn, Connection, RawSock, SockOpts, StatefulSock};
+use super::{AbstractConn, ConnState, Connection, LifeCycle, RawSock, SockOpts, StatefulSock};
 use vpn_core::Result;
+
+#[derive(Clone, Copy)]
+enum TcpState {
+    Initialized,
+    // Handshake
+    Syn,
+    SynAck,
+    Running,
+
+    // Graceful shutdown
+    Fin,
+    FinAck,
+    Finished,
+
+    // Forced shutdown
+    Rst,
+}
+
+#[derive(Clone, Copy)]
+pub struct TcpLifeCycle {
+    conn_state: ConnState,
+    tcp_state: TcpState,
+}
+impl LifeCycle for TcpLifeCycle {
+    type P<'a> = TcpPacket<'a>;
+    fn initialize() -> Self {
+        Self {
+            conn_state: ConnState::Alive,
+            tcp_state: TcpState::Initialized,
+        }
+    }
+    fn get_state(&self) -> ConnState {
+        unimplemented!()
+    }
+    fn check_state(&mut self, input: TcpPacket<'_>) {
+        unimplemented!()
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct RawTcpSock {
@@ -23,7 +60,7 @@ impl From<StatefulSock> for RawTcpSock {
         Self { abs: value }
     }
 }
-impl RawSock<StatefulSock> for RawTcpSock {
+impl RawSock<StatefulSock, TcpLifeCycle> for RawTcpSock {
     const IPPROTO: i32 = IPPROTO_TCP;
 
     fn get_abstract(&self) -> StatefulSock {
@@ -60,28 +97,18 @@ impl RawSock<StatefulSock> for RawTcpSock {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TcpState {
-    Run,
-    Fin,
-}
-
 #[derive(Clone, Copy)]
 pub struct TcpConnection {
-    abs: AbstractConn<StatefulSock, RawTcpSock>,
-    state: TcpState,
+    abs: AbstractConn<StatefulSock, RawTcpSock, TcpLifeCycle>,
 }
 
-impl From<AbstractConn<StatefulSock, RawTcpSock>> for TcpConnection {
-    fn from(value: AbstractConn<StatefulSock, RawTcpSock>) -> Self {
-        TcpConnection {
-            abs: value,
-            state: TcpState::Run,
-        }
+impl From<AbstractConn<StatefulSock, RawTcpSock, TcpLifeCycle>> for TcpConnection {
+    fn from(value: AbstractConn<StatefulSock, RawTcpSock, TcpLifeCycle>) -> Self {
+        TcpConnection { abs: value }
     }
 }
 
-impl Connection<StatefulSock, RawTcpSock, TcpPacket<'_>> for TcpConnection {
+impl Connection<StatefulSock, RawTcpSock, TcpPacket<'_>, TcpLifeCycle> for TcpConnection {
     fn send_to_remote_host(&mut self, packet: &mut [u8]) -> Result<()> {
         self.abs.sock.spoof_send(packet, self.abs.self_addr)
     }
@@ -91,11 +118,12 @@ impl Connection<StatefulSock, RawTcpSock, TcpPacket<'_>> for TcpConnection {
             .spoof_recv(self.abs.peer_addr, self.abs.dst_addr)
     }
 
-    fn get_conn_opts(packet: &Ipv4Packet) -> Option<SockOpts> {
+    fn get_conn_opts<'a>(packet: &'a Ipv4Packet) -> Option<SockOpts<TcpLifeCycle>> {
         let next_layer_packet = TcpPacket::new(packet.payload())?;
 
         Some(SockOpts {
             eph_port: Some(next_layer_packet.get_source()),
+            life_cycle: TcpLifeCycle::initialize(),
         })
     }
 }
