@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.veil.client</string>
+
+  <!-- Run as root -->
+  <key>UserName</key>
+  <string>root</string>
+
+  <!-- Command to run -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/veil-client-service</string>
+    <string>__UID__</string>
+    <string>__GID__</string>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/var/log/veil-client.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/var/log/veil-client.err</string>
+
+  <!-- Run at boot -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Do not restart -->
+  <key>KeepAlive</key>
+  <false/>
+
+  <!-- Clean up the socket after exit -->
+  <key>StandardOutPath</key>
+  <string>/var/log/veil-client.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/veil-client.err</string>
+
+  <!-- Use a wrapper script to implement ExecStopPost logic -->
+</dict>
+</plist>

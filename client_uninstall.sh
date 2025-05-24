@@ -14,7 +14,17 @@ done
 
 OS="$(uname)"
 if [[ "$OS" == "Darwin" ]]; then
-    echo "Running on macOS"
+    echo "Uninstalling for macOS..."
+
+    echo "Removing launchd plist"
+    launchctl unload /Library/LaunchDaemons/com.veil.client.plist
+    rm /var/log/veil-client.log /var/log/veil-client.err
+
+    echo "Removing veil environment"
+    rm -rf /etc/veilj
+
+    echo "Removing binaries"
+    rm /usr/local/bin/veil-client-service /bin/veil-cli /bin/veilctl
 elif [[ "$OS" == "Linux" ]]; then
     echo "Uninstalling for linux system..."
 

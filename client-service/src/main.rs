@@ -21,7 +21,6 @@ async fn main() {
     vpn_core::logs::init_logger("daemon", "info", false);
     let listener = UnixListener::bind("/tmp/veil.sock").unwrap();
 
-    #[cfg(target_os = "linux")]
     change_sock_ownership(
         "/tmp/veil.sock",
         exec_args.next().unwrap().parse().unwrap(),

@@ -1,13 +1,12 @@
 #!/bin/bash
 
-# Optional: point to your actual tool or backend handler
-VEIL_CLI="/bin/veil-cli"
+OS=$(uname)
 
-journalctl -fu veil.service --no-pager --since=now &
-LOG_PID=$!
-
-# Handle Ctrl+C to clean up background log stream
-trap "kill $LOG_PID 2>/dev/null; exit" INT TERM
+if [[ $OS == "Darwin" ]]; then
+  VEIL_CLI="/usr/local/bin/veil-cli"
+elif [[ $OS == "Linux" ]]; then
+  VEIL_CLI="/bin/veil-cli"
+fi
 
 while true; do
     # Show the prompt
@@ -25,5 +24,3 @@ while true; do
         eval $VEIL_CLI "$cmd"
     fi
 done
-
-kill -9 $(pidof journalctl)
