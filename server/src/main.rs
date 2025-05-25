@@ -14,7 +14,7 @@ use std::{
     collections::HashMap,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use vpn_core::{
     logs::init_logger,
@@ -29,11 +29,12 @@ use vpn_core::{
 use tokio::{
     io::{split, AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    runtime::Handle,
     sync::{
         mpsc::{channel, Receiver, Sender},
         Mutex, RwLock,
     },
-    task::JoinHandle,
+    task::{yield_now, JoinHandle},
     time::timeout,
 };
 
@@ -90,6 +91,20 @@ async fn run_server() -> Result<()> {
     let session_registry = Arc::new(Mutex::new(SessionRegistry::create()));
     session_registry.lock().await.try_claim(0)?;
 
+    tokio::spawn(async move {
+        info!("Checking tasks");
+        let mut last_check = SystemTime::now();
+        loop {
+            if last_check.elapsed().unwrap() > Duration::from_secs(2) {
+                let metrics = Handle::current().metrics();
+                let n = metrics.num_alive_tasks();
+                info!("Runtime has {} active tasks", n);
+                last_check = SystemTime::now();
+            }
+            yield_now().await;
+        }
+    });
+
     loop {
         info!("Listening for clients");
         let (stream, peer_addr) = listener.accept().await?;
@@ -136,29 +151,46 @@ async fn handle_client(stream: SecureStream, session_id: SessionID) -> Result<()
     let conns: Arc<RwLock<HashMap<ConnIdent, ClientConn>>> = Arc::new(RwLock::new(HashMap::new()));
 
     let (mut tls_reader, mut tls_writer) = split(stream);
-    let (in_sender, mut in_receiver) = channel(100);
+    let (in_sender, mut in_receiver): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = channel(100);
+
+    let responder_handle = tokio::spawn(async move {
+        info!("Responder running");
+        while let Some(response) = in_receiver.recv().await {
+            info!("Responder got response {response:?}");
+            tls_writer.write_all(&response).await.unwrap();
+        }
+        info!("Responder done");
+    });
 
     tokio::spawn(async move {
         info!("Forwarder running");
         let mut buf = [0u8; MTU_SIZE];
-        loop {
+        'listener: loop {
             let size = tls_reader.read(&mut buf).await.unwrap();
             info!("Got packet from TLS");
             if let Some(stage) = DeAuthStage::from_bytes(&buf[..size]) {
-                let death_advance = match stage {
+                let deauth_advance = match stage {
                     DeAuthStage::Disconnect(id) => {
                         if session_id == id {
+                            info!("Got disconnect instruction from session {session_id}. Sending acknowledgement.");
                             DeAuthStage::Acknowledge(session_id)
                         } else {
                             DeAuthStage::Rejection
                         }
                     }
-                    _ => DeAuthStage::Rejection,
+                    _ => {
+                        warn!("Invalid DeAuth sequence. Rejecting");
+                        DeAuthStage::Rejection
+                    }
                 };
                 in_sender
-                    .send(death_advance.to_bytes().unwrap())
+                    .send(deauth_advance.to_bytes().unwrap())
                     .await
                     .unwrap();
+
+                if let DeAuthStage::Acknowledge(_) = deauth_advance {
+                    break 'listener;
+                }
             }
             let (conn_ident, protocol, packet) = process_packet(&buf[..size]).unwrap();
 
@@ -185,16 +217,17 @@ async fn handle_client(stream: SecureStream, session_id: SessionID) -> Result<()
                 }
             }
         }
+
+        info!("Listener stopped. Cleaning up session {session_id}");
+        responder_handle.abort();
+        let mut conns_lock = conns.write().await;
+        for (_conn_ident, conn) in conns_lock.iter() {
+            conn.out_link_handle.abort();
+            conn.in_link_handle.abort();
+        }
+        conns_lock.clear();
     });
 
-    tokio::spawn(async move {
-        info!("Responder running");
-        while let Some(response) = in_receiver.recv().await {
-            info!("Responder got response {response:?}");
-            tls_writer.write_all(&response).await.unwrap();
-        }
-        info!("Responder done");
-    });
     Ok(())
 }
 
@@ -269,14 +302,14 @@ async fn handle_icmp(packet: Ipv4Packet<'_>, in_sender: Sender<Vec<u8>>) {
     }
 }
 
-async fn shutdown_conn(conn_ident: ConnIdent, conns: Arc<RwLock<HashMap<ConnIdent, ClientConn>>>) {
-    if let Some(conn) = conns.read().await.get(&conn_ident) {
+async fn shutdown_conn(conn_ident: ConnIdent, conns: &mut HashMap<ConnIdent, ClientConn>) {
+    if let Some(conn) = conns.get(&conn_ident) {
         info!("Sutting down!");
         conn.out_link_handle.abort();
         conn.in_link_handle.abort();
     }
 
-    conns.write().await.remove(&conn_ident);
+    conns.remove(&conn_ident);
 }
 
 async fn init_links<T, S, P, C, L>(
@@ -305,7 +338,7 @@ where
                 }
                 _ => {
                     info!("Timout reached");
-                    shutdown_conn(conn_ident, conns).await;
+                    shutdown_conn(conn_ident, &mut *conns.write().await).await;
                     break;
                 }
             }
