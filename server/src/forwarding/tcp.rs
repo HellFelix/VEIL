@@ -15,7 +15,6 @@ use vpn_core::Result;
 
 #[derive(Clone, Copy)]
 enum TcpState {
-    Initialized,
     // Handshake
     Syn,
     SynAck,
@@ -29,6 +28,14 @@ enum TcpState {
     // Forced shutdown
     Rst,
 }
+const ACK_MASK: u8 = 0b0001_0000;
+const RST_MASK: u8 = 0b0000_0100;
+const SYN_MASK: u8 = 0b0000_0010;
+const FIN_MASK: u8 = 0b0000_0001;
+
+fn flag_set(flags: u8, field_mask: u8) -> bool {
+    flags & field_mask != 0
+}
 
 #[derive(Clone, Copy)]
 pub struct TcpLifeCycle {
@@ -40,14 +47,56 @@ impl LifeCycle for TcpLifeCycle {
     fn initialize() -> Self {
         Self {
             conn_state: ConnState::Alive,
-            tcp_state: TcpState::Initialized,
+            tcp_state: TcpState::Syn,
         }
     }
     fn get_state(&self) -> ConnState {
-        unimplemented!()
+        match self.tcp_state {
+            TcpState::Finished => ConnState::Finished,
+            TcpState::Rst => ConnState::Broken,
+            _ => ConnState::Alive,
+        }
     }
     fn check_state(&mut self, input: TcpPacket<'_>) {
-        unimplemented!()
+        let flags = input.get_flags();
+        if flag_set(flags, RST_MASK) {
+            self.tcp_state = TcpState::Rst;
+            warn!("Found TCP Reset!");
+        } else {
+            match self.tcp_state {
+                TcpState::Syn => {
+                    if flag_set(flags, SYN_MASK) && flag_set(flags, ACK_MASK) {
+                        self.tcp_state = TcpState::SynAck;
+                    }
+                }
+                TcpState::SynAck => {
+                    if flag_set(flags, ACK_MASK) {
+                        self.tcp_state = TcpState::SynAck;
+                    }
+                }
+                TcpState::Running => {
+                    if flag_set(flags, FIN_MASK) {
+                        self.tcp_state = TcpState::Fin;
+                    }
+                }
+                TcpState::Fin => {
+                    if flag_set(flags, FIN_MASK) && flag_set(flags, ACK_MASK) {
+                        self.tcp_state = TcpState::FinAck;
+                    }
+                }
+                TcpState::FinAck => {
+                    if flag_set(flags, ACK_MASK) {
+                        self.tcp_state = TcpState::Finished;
+                    }
+                }
+                TcpState::Finished => {
+                    warn!("Finished TCP connection still running");
+                }
+                TcpState::Rst => {
+                    warn!("Reset TCP connection still running");
+                }
+            }
+        }
     }
 }
 
