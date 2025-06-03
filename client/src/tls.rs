@@ -3,7 +3,6 @@ use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     str::FromStr,
     sync::Arc,
-    thread::sleep,
     time::Duration,
 };
 
@@ -19,6 +18,7 @@ use tokio::{
         mpsc::{channel, Receiver, Sender},
         Mutex,
     },
+    task::JoinHandle,
 };
 use tokio_rustls::{client::TlsStream, Connect, TlsAcceptor, TlsConnector};
 use vpn_core::{
@@ -152,12 +152,6 @@ impl Client {
         let write_handle = tokio::spawn(async move {
             Self::handle_write(tls_writer, receiver).await.unwrap();
         });
-        let remote_handle = tokio::spawn(async move {
-            Self::handle_remote_read(tls_reader, interface)
-                .await
-                .unwrap();
-            info!("Finished reader");
-        });
         let sender_clone = sender.clone();
         let tun_handle = tokio::spawn(async move {
             Self::handle_tun_read(sender, self.interface).await.unwrap();
@@ -168,21 +162,41 @@ impl Client {
                 .await
                 .unwrap();
         });
+        let remote_handle = tokio::spawn(async move {
+            Self::handle_remote_read(
+                tls_reader,
+                interface,
+                self.session_id,
+                (write_handle, tun_handle, unix_handle),
+            )
+            .await
+            .unwrap();
+            info!("Finished reader");
+        });
 
-        let (_write_res, _read_res, _tun_res, _unix_res) =
-            tokio::join!(write_handle, remote_handle, tun_handle, unix_handle);
+        if let Ok(_) = remote_handle.await {
+            info!("Shutdown complete");
+        } else {
+            error!("Shutdown failed");
+        }
     }
 
-    async fn handle_remote_read(mut reader: SecureRead, interface: TunInterface) -> Result<()> {
-        info!("Reader running");
+    async fn handle_remote_read(
+        mut reader: SecureRead,
+        interface: TunInterface,
+        session_id: SessionID,
+        handles: (JoinHandle<()>, JoinHandle<()>, JoinHandle<()>),
+    ) -> Result<()> {
         let mut res_buf = [0; MTU_SIZE];
-        loop {
-            info!("Reading remote");
+        'listener: loop {
             if let Ok(len) = reader.read(&mut res_buf[4..]).await {
                 if let Some(deauth) = DeAuthStage::from_bytes(&res_buf[4..len + 4]) {
                     match deauth {
-                        DeAuthStage::Acknowledge(session_id) => {
-                            panic!("Shut down");
+                        DeAuthStage::Acknowledge(id) => {
+                            if id == session_id {
+                                info!("Disconnect acknowledged. Shutting down");
+                                break 'listener;
+                            }
                         }
                         _ => {}
                     }
@@ -196,12 +210,15 @@ impl Client {
                 continue;
             }
         }
+        handles.0.abort();
+        handles.1.abort();
+        handles.2.abort();
+        Ok(())
     }
 
     async fn handle_tun_read(sender: Sender<Vec<u8>>, interface: TunInterface) -> Result<()> {
         let mut req_buf = [0; MTU_SIZE];
         loop {
-            info!("Reading TUN");
             // TODO: Implement AsyncRead for interface so that read can be performed without
             // calling yield_now.
             let mut size = 0;
