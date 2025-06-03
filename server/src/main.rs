@@ -91,20 +91,6 @@ async fn run_server() -> Result<()> {
     let session_registry = Arc::new(Mutex::new(SessionRegistry::create()));
     session_registry.lock().await.try_claim(0)?;
 
-    tokio::spawn(async move {
-        info!("Checking tasks");
-        let mut last_check = SystemTime::now();
-        loop {
-            if last_check.elapsed().unwrap() > Duration::from_secs(2) {
-                let metrics = Handle::current().metrics();
-                let n = metrics.num_alive_tasks();
-                info!("Runtime has {} active tasks", n);
-                last_check = SystemTime::now();
-            }
-            yield_now().await;
-        }
-    });
-
     loop {
         info!("Listening for clients");
         let (stream, peer_addr) = listener.accept().await?;
