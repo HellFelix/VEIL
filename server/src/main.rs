@@ -139,11 +139,15 @@ async fn handle_client(stream: SecureStream, session_id: SessionID) -> Result<()
     let (mut tls_reader, mut tls_writer) = split(stream);
     let (in_sender, mut in_receiver): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = channel(100);
 
-    let responder_handle = tokio::spawn(async move {
+    let _responder_handle = tokio::spawn(async move {
         info!("Responder running");
         while let Some(response) = in_receiver.recv().await {
             info!("Responder got response {response:?}");
             tls_writer.write_all(&response).await.unwrap();
+            if let Some(DeAuthStage::Acknowledge(_)) = DeAuthStage::from_bytes(&response) {
+                info!("Shutting down responder for session {session_id:#x}");
+                break;
+            }
         }
         info!("Responder done");
     });
@@ -158,7 +162,7 @@ async fn handle_client(stream: SecureStream, session_id: SessionID) -> Result<()
                 let deauth_advance = match stage {
                     DeAuthStage::Disconnect(id) => {
                         if session_id == id {
-                            info!("Got disconnect instruction from session {session_id}. Sending acknowledgement.");
+                            info!("Got disconnect instruction from session {session_id:#x}. Sending acknowledgement.");
                             DeAuthStage::Acknowledge(session_id)
                         } else {
                             DeAuthStage::Rejection
@@ -204,8 +208,7 @@ async fn handle_client(stream: SecureStream, session_id: SessionID) -> Result<()
             }
         }
 
-        info!("Listener stopped. Cleaning up session {session_id}");
-        responder_handle.abort();
+        info!("Listener stopped. Cleaning up session {session_id:#x}");
         let mut conns_lock = conns.write().await;
         for (_conn_ident, conn) in conns_lock.iter() {
             conn.out_link_handle.abort();
