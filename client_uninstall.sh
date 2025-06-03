@@ -24,7 +24,7 @@ if [[ "$OS" == "Darwin" ]]; then
     rm -rf /etc/veilj
 
     echo "Removing binaries"
-    rm /usr/local/bin/veil-client-service /bin/veil-cli /bin/veilctl
+    rm /usr/local/bin/veil-client-service /usr/local/bin/veil-cli /usr/local/bin/veilctl
 elif [[ "$OS" == "Linux" ]]; then
     echo "Uninstalling for linux system..."
 
