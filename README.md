@@ -44,7 +44,7 @@ is set up to serve `CLIENT_INTERNAL -> SERVER_INTERNAL`. Thus, after authenticat
 
 ### Server
 The machine running the server program acts as a "dumb tunnel", forwarding packets from trusted client devices (currently supports
-TCP, UDP, and ICMP). See server documentation for details on how the program works.
+TCP, UDP, and ICMP). See [server documentation](./server/README.md) for details on how the program works.
 
 ### Client
 Running the client service on a device will allow the device to connect to another device running the server. Having connected
