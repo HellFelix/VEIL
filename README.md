@@ -5,16 +5,24 @@
 It may be possible to unlock raw sockets to allow the server crate to run on these systems, although realistically, 
 running on linux is currently the only viable option.
 
-### Recommended
-When using Linux or macOS, the easiest method of installation is via the latest release.
-
 ### Manual
 Both client and server system can be installed manually by cloning this repository.
 ``git clone git@github.com:HellFelix/VEIL.git && cd VEIL``
 Then build the necessary crates. Note that the server and client systems are built independently
-``./build.sh server``
-``./build.sh client``
-
+```
+./build.sh server
+```
+```
+./build.sh client
+```
+Having built the client crates, the ctl tool and systemd service can then be installed using the installation script
+```
+./client_install.sh
+```
+Similarly, these tools can be uninstalled using
+```
+./client_uninstall.sh
+```
 
 ### Certificates
 VEIL operates on CA certificates, using [rustls](https://crates.io/crates/rustls) for authentication and safe
@@ -34,12 +42,21 @@ the server's internal IP address will be 172.16.0.1, which can be pinged directl
 is set up to serve `CLIENT_INTERNAL -> SERVER_INTERNAL`. Thus, after authentication, one might ping the server using
 ```ping SERVER_INTERNAL```
 
-
-
-
 ### Server
+The machine running the server program acts as a "dumb tunnel", forwarding packets from trusted client devices (currently supports
+TCP, UDP, and ICMP). See server documentation for details on how the program works.
 
 ### Client
+Running the client service on a device will allow the device to connect to another device running the server. Having connected
+to a server, one must then route traffic through the TUN/UTUN interface which is setup during connection. The logs will 
+show what the interface is called. If everything was run correctly, you will see the following:
+```
+[INFO]: Successfully initialized INTERFACE_NAME interface
+```
+
+Then, using the `route` command, one can route traffic through the new interface. Note that this can be done for individual 
+hosts or globaly depending on use case.
+After routing is correctly set up, traffic will now go through the tunnel.
 
 ## License
 
