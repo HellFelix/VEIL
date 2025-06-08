@@ -28,7 +28,7 @@ rm clientCA.cnf
 
 # Generate server key and CSR
 openssl genrsa -out server.key 2048
-openssl req -new -key server.key -out server.csr -config ../config/server.cnf
+openssl req -new -key server.key -out server.csr -config ./server.cnf
 # Sign server CSR with root CA
 openssl x509 -req -in server.csr -CA rootCA.pem -CAkey rootCA.key -CAcreateserial \
-  -out server.crt -days $TIMEOUT -sha256 -extfile ../config/server.cnf -extensions req_ext
+  -out server.crt -days $TIMEOUT -sha256 -extfile ./server.cnf -extensions req_ext
