@@ -1,0 +1,70 @@
+# cargo-deny configuration enforcing plan.md §5.3 and §5.6.
+#
+# The workspace dependency table in Cargo.toml is the allowlist; this file is
+# the denylist, and it applies transitively so that an allowed crate quietly
+# pulling in a forbidden one is caught.
+
+[graph]
+targets = [{ triple = "x86_64-unknown-linux-gnu" }]
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Workspace members reference each other by path and are not published, so they
+# carry no version requirement. Third-party wildcards remain denied.
+allow-wildcard-paths = true
+
+# plan.md §5.3. Each entry names what VEIL writes instead.
+deny = [
+  # Hides IFF_NO_PI and the header question that broke v1's Linux client.
+  { crate = "tun", reason = "veil-net::tun is written over libc" },
+  { crate = "tun-tap", reason = "veil-net::tun is written over libc" },
+  # Netlink message construction is the thing worth learning here.
+  { crate = "rtnetlink", reason = "veil-net::netlink is hand-rolled over AF_NETLINK" },
+  { crate = "netlink-packet-route", reason = "veil-net::netlink is hand-rolled over AF_NETLINK" },
+  { crate = "neli", reason = "veil-net::netlink is hand-rolled over AF_NETLINK" },
+  # See plan.md §5.4: the firewall shells out to `nft -f -` instead.
+  { crate = "nftables", reason = "veil-net::firewall shells out to nft -f -" },
+  { crate = "rustables", reason = "veil-net::firewall shells out to nft -f -" },
+  # A safe wrapper over libc is still a wrapper; §5.1 says raw libc.
+  { crate = "nix", reason = "direct libc calls behind the syscall! macro" },
+  # VEIL v2 barely parses packets; see §5.5.
+  { crate = "pnet", reason = "veil-proto::ip is about forty lines" },
+  { crate = "etherparse", reason = "veil-proto::ip is about forty lines" },
+  # The stub resolver is a forwarder, not a resolver.
+  { crate = "hickory-resolver", reason = "veil-clientd::dns is a forwarder" },
+  { crate = "hickory-proto", reason = "veil-clientd::dns is a forwarder" },
+  { crate = "trust-dns-resolver", reason = "veil-clientd::dns is a forwarder" },
+  { crate = "trust-dns-proto", reason = "veil-clientd::dns is a forwarder" },
+  # v1 used it for wire framing and got type confusion between control and data.
+  { crate = "bincode", reason = "postcard, on a stream separate from data" },
+  # Forbidden as a direct dependency; accepted transitively via quinn (§5.3).
+  { crate = "socket2", reason = "socket options are libc::setsockopt", wrappers = [
+    "quinn-udp",
+    "quinn",
+    "tokio",
+  ] },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup component add rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup component add clippy
+      - uses: Swatinem/rust-cache@v2
+      # The M0 gate. The workspace deny-list (plan.md §4) makes unwrap, expect
+      # and panic hard errors outside tests.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  deny:
+    name: Dependency bans
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  deps:
+    name: Dependency allowlist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # plan.md §5.6: no member may declare a dependency the workspace table
+      # does not list.
+      - run: ./scripts/check-deps.sh
+
+  lockfile:
+    name: Lockfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Cargo.lock is committed (plan.md §2), so it must already be current.
+      - run: cargo metadata --locked --format-version 1 > /dev/null
