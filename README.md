@@ -1,5 +1,11 @@
 # VEIL - Verified Encrypted Internet Link
 
+> **VEIL v2 is under construction.** The v1 implementation described below has
+> been removed; it is preserved at the git tag `v1-final` and can be recovered
+> with `git checkout v1-final`. The v2 design and its milestones are in
+> [`plan.md`](./plan.md), and the installation and usage instructions here will
+> be rewritten at M14. Nothing below currently builds.
+
 ## Installation
 **Note: The server runs using raw sockets from userspace, which is generally disallowed on MacOS and Windows.** 
 It may be possible to unlock raw sockets to allow the server crate to run on these systems, although realistically, 

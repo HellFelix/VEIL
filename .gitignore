@@ -1,8 +1,9 @@
-**/target/
-utun-test/
-logs/
-*/Cargo.lock
-certs/
+/target/
+fuzz/target/
+fuzz/artifacts/
+
+web/*/node_modules/
+web/*/dist/
+
+*.key
 .DS_Store
-.tokeignore
-veil.conf
