@@ -1,0 +1,20 @@
+use std::io;
+
+/// The workspace-wide error type, produced at daemon boundaries.
+///
+/// Variants are added as the milestones that need them land. Domain errors stay
+/// in their own crate and convert into this type rather than replacing it.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    /// An operating system call failed.
+    #[error("i/o error: {0}")]
+    Io(#[from] io::Error),
+
+    /// Configuration was missing, malformed or internally inconsistent.
+    #[error("configuration error: {0}")]
+    Config(String),
+}
+
+/// [`Result`](std::result::Result) specialised to [`Error`].
+pub type Result<T, E = Error> = std::result::Result<T, E>;

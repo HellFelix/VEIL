@@ -1,0 +1,4 @@
+# plan.md §4: the deny-list applies to the data path, not to test assertions.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

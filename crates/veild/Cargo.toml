@@ -1,0 +1,16 @@
+[package]
+name = "veild"
+description = "The VEIL server daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+tracing.workspace = true
+veil-common.workspace = true
+
+[lints]
+workspace = true

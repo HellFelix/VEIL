@@ -1,0 +1,16 @@
+[package]
+name = "veil-common"
+description = "Shared error type and logging setup for the VEIL workspace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

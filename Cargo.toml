@@ -1,0 +1,89 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.91"
+license = "MIT"
+repository = "https://github.com/HellFelix/veil"
+# Deployed as systemd units, not consumed from crates.io. This also lets the
+# members depend on each other by path alone, with no duplicated version string.
+publish = false
+
+# The normative dependency allowlist (plan.md §5.2). A crate that is not listed
+# here may not be declared by any workspace member, and members must inherit
+# with `workspace = true` rather than naming a version. `scripts/check-deps.sh`
+# enforces both halves of that rule; `deny.toml` bans the crates in §5.3.
+[workspace.dependencies]
+# Crypto and transport
+quinn = "0.11.11"
+# Pinned to the 0.23 line: quinn 0.11 links against rustls 0.23.
+rustls = { version = "0.23", default-features = false, features = ["std"] }
+rustls-pki-types = "1.15.1"
+# M1 picks exactly one of these two based on Ed25519 support in the rustls
+# raw-public-key path (plan.md §5.2); the other is deleted from this table.
+aws-lc-rs = "1.17.3"
+ring = "0.17.14"
+ed25519-dalek = "3.0.0"
+rand = "0.10.2"
+rand_core = "0.10.1"
+zeroize = "1.9.0"
+base64 = "0.23.0"
+
+# Async runtime
+tokio = { version = "1.53.1", features = [
+  "net",
+  "io-util",
+  "sync",
+  "time",
+  "signal",
+  "macros",
+  "rt-multi-thread",
+] }
+tokio-util = { version = "0.7.19", features = ["codec"] }
+futures-util = "0.3.33"
+bytes = "1.12.1"
+
+# Serialization and config
+serde = { version = "1.0.229", features = ["derive"] }
+postcard = "1.1.3"
+toml = "1.1.4"
+serde_json = "1.0.151"
+
+# Web
+axum = "0.8.9"
+tower = "0.5.3"
+tower-http = { version = "0.7.0", features = ["fs"] }
+rust-embed = "8.12.0"
+
+# Plumbing
+libc = "0.2.189"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+thiserror = "2.0.19"
+clap = { version = "4.6.5", features = ["derive"] }
+ipnet = "2.12.0"
+
+# Dev-dependencies (plan.md §5.2)
+proptest = "1.11.0"
+tempfile = "3.27.0"
+
+# Internal crates
+veil-common = { path = "crates/veil-common" }
+veil-config = { path = "crates/veil-config" }
+veil-crypto = { path = "crates/veil-crypto" }
+veil-net = { path = "crates/veil-net" }
+veil-proto = { path = "crates/veil-proto" }
+
+# plan.md §4. v1 had roughly fifteen `unwrap`s on the data path, several
+# reachable by a single malformed packet; this is the structural answer.
+# `expect_used` is relaxed at individual `main()` startup sites and in tests.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[workspace.lints.rust]
+missing_docs = "warn"
