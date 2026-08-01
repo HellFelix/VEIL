@@ -56,6 +56,8 @@ deny = [
   { crate = "trust-dns-proto", reason = "veil-clientd::dns is a forwarder" },
   # v1 used it for wire framing and got type confusion between control and data.
   { crate = "bincode", reason = "postcard, on a stream separate from data" },
+  # aws-lc-rs is the chosen provider (M1); ring must not reappear transitively.
+  { crate = "ring", reason = "aws-lc-rs is the rustls crypto provider" },
   # Forbidden as a direct dependency; accepted transitively via quinn (§5.3).
   { crate = "socket2", reason = "socket options are libc::setsockopt", wrappers = [
     "quinn-udp",
