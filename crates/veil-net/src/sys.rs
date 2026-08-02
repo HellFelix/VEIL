@@ -85,7 +85,8 @@ macro_rules! syscall {
 
 #[cfg(test)]
 mod tests {
-    use crate::syscall;
+    // `syscall!` needs no import: `macro_rules!` is textually scoped, so it is
+    // already visible in this module, which is declared after it.
 
     #[test]
     fn success_yields_the_return_value() {
