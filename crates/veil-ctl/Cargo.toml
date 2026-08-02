@@ -12,6 +12,7 @@ publish.workspace = true
 clap.workspace = true
 tracing.workspace = true
 veil-common.workspace = true
+veil-crypto.workspace = true
 
 [lints]
 workspace = true
