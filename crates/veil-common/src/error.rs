@@ -14,6 +14,13 @@ pub enum Error {
     /// Configuration was missing, malformed or internally inconsistent.
     #[error("configuration error: {0}")]
     Config(String),
+
+    /// The QUIC endpoint could not be established, bound or connected.
+    ///
+    /// Kept distinct from [`Error::Config`] so that an unreachable server reads
+    /// differently from a server that was reached and refused us.
+    #[error("transport error: {0}")]
+    Transport(String),
 }
 
 /// [`Result`](std::result::Result) specialised to [`Error`].
