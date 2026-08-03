@@ -7,3 +7,7 @@ web/*/dist/
 
 *.key
 .DS_Store
+
+# Scratch install trees from scripts/install.sh --dir
+/smoke/
+/veilroot/
