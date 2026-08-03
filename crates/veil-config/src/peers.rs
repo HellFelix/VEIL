@@ -278,7 +278,10 @@ mod tests {
 
         // Revocation across a restart: still in the file, never whitelisted.
         assert_eq!(file.lookup(&revoked), None);
-        assert!(file.get(&revoked).is_some(), "still parsed, just not allowed");
+        assert!(
+            file.get(&revoked).is_some(),
+            "still parsed, just not allowed"
+        );
 
         assert_eq!(file.lookup(&stranger), None);
     }
@@ -383,7 +386,10 @@ mod tests {
             "#,
             key()
         );
-        assert!(PeerFile::parse(&typo).is_err(), "a misspelled key must fail");
+        assert!(
+            PeerFile::parse(&typo).is_err(),
+            "a misspelled key must fail"
+        );
     }
 
     #[test]
@@ -400,10 +406,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("peers.toml");
 
-        assert!(matches!(
-            PeerFile::load(&path),
-            Err(Error::Read { .. })
-        ));
+        assert!(matches!(PeerFile::load(&path), Err(Error::Read { .. })));
 
         let laptop = key();
         std::fs::write(

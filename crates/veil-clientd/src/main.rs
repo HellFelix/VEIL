@@ -104,9 +104,11 @@ fn bind(
 
     let mut transport = quinn::TransportConfig::default();
     transport.keep_alive_interval(Some(KEEPALIVE));
-    transport.max_idle_timeout(Some(IDLE_TIMEOUT.try_into().map_err(|_| {
-        Error::Config("idle timeout is out of range for QUIC".into())
-    })?));
+    transport.max_idle_timeout(Some(
+        IDLE_TIMEOUT
+            .try_into()
+            .map_err(|_| Error::Config("idle timeout is out of range for QUIC".into()))?,
+    ));
     config.transport_config(Arc::new(transport));
 
     // Bind the address family the server needs; the port is ephemeral. QUIC
@@ -117,8 +119,8 @@ fn bind(
         SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))
     };
 
-    let mut endpoint =
-        Endpoint::client(local).map_err(|e| Error::Transport(format!("could not bind {local}: {e}")))?;
+    let mut endpoint = Endpoint::client(local)
+        .map_err(|e| Error::Transport(format!("could not bind {local}: {e}")))?;
     endpoint.set_default_client_config(config);
 
     Ok(endpoint)

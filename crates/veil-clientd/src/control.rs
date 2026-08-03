@@ -45,7 +45,9 @@ pub async fn read_frame(stream: &mut RecvStream) -> Result<String, String> {
 
     let len = usize::from(u16::from_be_bytes(prefix));
     if len > MAX_FRAME {
-        return Err(format!("frame of {len} bytes exceeds the {MAX_FRAME} limit"));
+        return Err(format!(
+            "frame of {len} bytes exceeds the {MAX_FRAME} limit"
+        ));
     }
 
     let mut body = vec![0u8; len];
