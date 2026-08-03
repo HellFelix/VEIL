@@ -4,7 +4,80 @@
 > been removed; it is preserved at the git tag `v1-final` and can be recovered
 > with `git checkout v1-final`. The v2 design and its milestones are in
 > [`plan.md`](./plan.md), and the installation and usage instructions here will
-> be rewritten at M14. Nothing below currently builds.
+> be rewritten at M14. Nothing below the quick start currently builds.
+
+## Quick start (development)
+
+> Provisional, and covers the control plane only: two machines authenticate each
+> other and exchange configuration. **No traffic is tunnelled yet** — the tun
+> device and packet forwarding arrive at M2 and M5. Superseded at M14.
+
+Nothing here needs root or any capability, because there is no tun device yet.
+
+### Install
+
+On both machines, from a clone of this repository:
+
+```sh
+# server
+./scripts/install.sh --server
+
+# client
+./scripts/install.sh --client
+```
+
+This builds in release mode and installs everything under `/etc/veil`: the
+three binaries in `bin/`, a `private.key` for that machine, and the config for
+its role. It prints that machine's public key. Re-running it never replaces an
+existing key or config.
+
+Pass `--owner "$USER"` to run the daemons without `sudo`, or `--dir PATH` to
+install somewhere else. Add `/etc/veil/bin` to your `PATH`.
+
+### Enrol the client
+
+Copy the client's public key to the server and add it to the whitelist:
+
+```sh
+veil-ctl peer add laptop ed25519:... --ipv4 10.44.0.2 --allowed 0.0.0.0/0
+veil-ctl peer list
+```
+
+Only the public half ever leaves the client. `veil-ctl peer` preserves the
+comments in `peers.toml`, so the file stays hand-editable.
+
+Then fill in `server` and `server_key` in the client's `/etc/veil/client.toml`,
+using the server's address and the key its install printed.
+
+### Run
+
+```sh
+veil-ctl serve      # on the server
+veil-ctl connect    # on the client
+```
+
+The client ends at `authorized by the server`. Every setting can be overridden
+on the command line, so `veil-ctl serve --listen 127.0.0.1:51820` needs no
+config file at all.
+
+**QUIC runs over UDP.** If a firewall is running, open **UDP** 51820, not TCP.
+
+### Revoke
+
+```sh
+veil-ctl peer set laptop --enabled false   # keep the entry as a record
+veil-ctl peer remove laptop                # delete it
+```
+
+Both take effect when `veild` restarts; live reload on `SIGHUP` arrives at M3.
+
+### Uninstall
+
+```sh
+./scripts/uninstall.sh
+```
+
+Removes `/etc/veil` entirely, including the private key, after confirmation.
 
 ## Installation
 **Note: The server runs using raw sockets from userspace, which is generally disallowed on MacOS and Windows.** 
