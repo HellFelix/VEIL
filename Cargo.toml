@@ -63,6 +63,13 @@ bytes = "1.12.1"
 serde = { version = "1.0.229", features = ["derive"] }
 postcard = "1.1.3"
 toml = "1.1.4"
+# Format-preserving TOML, from the same release line as `toml` above
+# (+spec-1.1.0). Amends plan.md §5.2: `veil-ctl peer` edits a file the operator
+# also hand-writes, and serializing our own structs back out would delete every
+# comment in it. §2 chose TOML precisely because it is diffable and
+# version-controllable. Adds exactly one crate to the graph; every one of its
+# own dependencies is already in Cargo.lock.
+toml_edit = "0.25.13"
 serde_json = "1.0.151"
 
 # Web
@@ -83,12 +90,16 @@ ipnet = "2.12.0"
 proptest = "1.11.0"
 tempfile = "3.27.0"
 
-# Internal crates
+# Internal crates. The two daemons are libraries as well as binaries so that
+# `veil-ctl serve` and `veil-ctl connect` run them in-process, with no second
+# binary to locate on PATH and no exit code to relay.
+veil-clientd = { path = "crates/veil-clientd" }
 veil-common = { path = "crates/veil-common" }
 veil-config = { path = "crates/veil-config" }
 veil-crypto = { path = "crates/veil-crypto" }
 veil-net = { path = "crates/veil-net" }
 veil-proto = { path = "crates/veil-proto" }
+veild = { path = "crates/veild" }
 
 # plan.md §4. v1 had roughly fifteen `unwrap`s on the data path, several
 # reachable by a single malformed packet; this is the structural answer.
