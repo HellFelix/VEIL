@@ -14,6 +14,7 @@ quinn.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 veil-common.workspace = true
+veil-config.workspace = true
 veil-crypto.workspace = true
 
 [lints]
