@@ -295,6 +295,11 @@ fn rank(key: &str) -> usize {
 }
 
 /// Writes `text` to `path` by rename, so a crash cannot truncate the original.
+///
+/// Replacing a file by rename installs a *new* inode, so mode and ownership are
+/// carried over deliberately. Without the ownership half, `sudo veil-ctl peer
+/// add` against a user-owned `peers.toml` would hand it to `root:root` and, at
+/// mode `0640`, lock the owner out of their own whitelist.
 fn write_atomically(path: &Path, text: &str) -> Result<(), Error> {
     use std::io::Write as _;
 
@@ -314,13 +319,18 @@ fn write_atomically(path: &Path, text: &str) -> Result<(), Error> {
         std::process::id()
     ));
 
-    let mode = mode_of(path).unwrap_or(NEW_FILE_MODE);
+    let existing = std::fs::metadata(path).ok();
+    let mode = existing.as_ref().map_or(NEW_FILE_MODE, mode_of);
 
     let result = (|| -> std::io::Result<()> {
         let mut file = open_with_mode(&temp, mode)?;
         file.write_all(text.as_bytes())?;
         file.sync_all()?;
         drop(file);
+
+        if let Some(existing) = &existing {
+            preserve_owner(&temp, existing)?;
+        }
 
         std::fs::rename(&temp, path)?;
         temp = PathBuf::new();
@@ -337,14 +347,38 @@ fn write_atomically(path: &Path, text: &str) -> Result<(), Error> {
 }
 
 #[cfg(unix)]
-fn mode_of(path: &Path) -> Option<u32> {
+fn mode_of(meta: &std::fs::Metadata) -> u32 {
     use std::os::unix::fs::PermissionsExt as _;
-    std::fs::metadata(path).ok().map(|m| m.permissions().mode())
+    meta.permissions().mode()
 }
 
 #[cfg(not(unix))]
-fn mode_of(_path: &Path) -> Option<u32> {
-    None
+fn mode_of(_meta: &std::fs::Metadata) -> u32 {
+    NEW_FILE_MODE
+}
+
+/// Gives `temp` the same owner as the file it is about to replace.
+///
+/// A no-op when they already match, which is the unprivileged case, so this
+/// only does real work under `sudo`. A failure is returned rather than ignored:
+/// silently changing the owner is the bug this exists to prevent.
+#[cfg(unix)]
+fn preserve_owner(temp: &Path, existing: &std::fs::Metadata) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let (uid, gid) = (existing.uid(), existing.gid());
+    let current = std::fs::metadata(temp)?;
+
+    if (current.uid(), current.gid()) == (uid, gid) {
+        return Ok(());
+    }
+
+    std::os::unix::fs::chown(temp, Some(uid), Some(gid))
+}
+
+#[cfg(not(unix))]
+fn preserve_owner(_temp: &Path, _existing: &std::fs::Metadata) -> std::io::Result<()> {
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -644,6 +678,31 @@ mod tests {
 
         let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "an operator's tightened mode survives");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saving_preserves_the_existing_owner() {
+        // Replacing by rename installs a new inode, so ownership has to be
+        // carried over explicitly. Unprivileged this can only assert that the
+        // owner is unchanged; the case that actually bit was `sudo veil-ctl
+        // peer add` against a user-owned file, which handed it to root:root and
+        // at mode 0640 locked the owner out of their own whitelist.
+        use std::os::unix::fs::MetadataExt as _;
+
+        let (_dir, path) = scratch(Some(""));
+        let before = std::fs::metadata(&path).expect("stat");
+
+        let mut editor = PeerEditor::open(&path).expect("open");
+        editor.add(&peer("laptop", key())).expect("add");
+        editor.save().expect("save");
+
+        let after = std::fs::metadata(&path).expect("stat");
+        assert_eq!(
+            (after.uid(), after.gid()),
+            (before.uid(), before.gid()),
+            "the owner must survive the rename"
+        );
     }
 
     #[cfg(unix)]
