@@ -8,8 +8,15 @@
 
 #![forbid(unsafe_code)]
 
+mod edit;
 mod error;
 mod peers;
+mod settings;
 
+pub use edit::{PeerChange, PeerEditor};
 pub use error::Error;
 pub use peers::{Peer, PeerFile};
+pub use settings::{
+    ClientSettings, DEFAULT_CLIENT_CONFIG, DEFAULT_LISTEN, DEFAULT_PEERS, DEFAULT_PRIVATE_KEY,
+    DEFAULT_SERVER_CONFIG, PartialClientSettings, PartialServerSettings, ServerSettings,
+};

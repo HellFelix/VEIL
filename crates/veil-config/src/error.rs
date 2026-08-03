@@ -51,4 +51,58 @@ pub enum Error {
     /// Two peers share one name, which would make the logs ambiguous.
     #[error("peer name {0} is used more than once")]
     DuplicateName(String),
+
+    /// A configuration file could not be written.
+    #[error("could not write {path}: {source}")]
+    Write {
+        /// The file that could not be written.
+        path: String,
+        /// The underlying failure.
+        source: io::Error,
+    },
+
+    /// A setting with no default was given neither in the file nor on the
+    /// command line.
+    ///
+    /// Names the field so the operator is told what to fill in rather than
+    /// which type failed to build.
+    #[error("{field} is not set; give it in {path} or on the command line")]
+    Missing {
+        /// The setting that is missing.
+        field: &'static str,
+        /// The file it was expected in.
+        path: String,
+    },
+
+    /// A `server_key` in a settings file could not be parsed.
+    #[error("{path}: server_key: {source}")]
+    SettingsKey {
+        /// The file holding the malformed key.
+        path: String,
+        /// Why the key was rejected.
+        source: veil_crypto::Error,
+    },
+
+    /// An operation named a peer that is not in the file.
+    #[error("no peer named {0}")]
+    UnknownPeer(String),
+
+    /// A file being edited was not valid TOML.
+    ///
+    /// Distinct from [`Error::Toml`]: that one comes from deserializing into
+    /// our types, this one from parsing the document we are about to modify.
+    #[error("could not parse {path} for editing: {source}")]
+    Edit {
+        /// The file that could not be parsed.
+        path: String,
+        /// The underlying parse failure.
+        source: toml_edit::TomlError,
+    },
+
+    /// `peer` exists in the file but is not an array of tables.
+    ///
+    /// Means someone wrote `peer = "..."` where `[[peer]]` belongs. Refused
+    /// rather than overwritten, since the file is hand-editable.
+    #[error("{0}: `peer` is not a [[peer]] array")]
+    NotPeerArray(String),
 }
